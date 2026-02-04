@@ -1,0 +1,76 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Arial', sans-serif;
+}
+
+#gameContainer {
+    position: relative;
+    background: linear-gradient(to bottom, #87CEEB, #E0F6FF);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+canvas {
+    display: block;
+    cursor: crosshair;
+}
+
+#ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+#powerBar {
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 15px;
+    min-width: 200px;
+    text-align: center;
+}
+
+#powerBar p {
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+#powerFill {
+    width: 0%;
+    height: 20px;
+    background: linear-gradient(90deg, #4CAF50, #FFC107, #FF5722);
+    border-radius: 5px;
+    transition: width 0.05s;
+}
+
+#stats {
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 5px;
+    display: flex;
+    gap: 20px;
+}
+
+#stats p {
+    margin: 0;
+}
+
+#stats span {
+    color: #FFD700;
+}

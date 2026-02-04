@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acuariom - Juego de Pesca</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui">
+            <div id="powerBar">
+                <div id="powerFill"></div>
+                <p>Presiona y mantén para lanzar</p>
+            </div>
+            <div id="stats">
+                <p>Pescados: <span id="catchCount">0</span></p>
+                <p>Puntos: <span id="score">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
