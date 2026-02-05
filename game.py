@@ -289,12 +289,12 @@ class Bote:
         if self.animando_lanzamiento:
             # Animación de lanzamiento
             progreso = self.tiempo_lanzamiento / 30
-            brazo_angulo = -math.pi / 3 - (math.pi / 2) * progreso
+            brazo_angulo = -math.pi / 2.5 - (math.pi / 2.2) * progreso
         else:
-            brazo_angulo = -math.pi / 3
+            brazo_angulo = -math.pi / 2.5
         
-        brazo_x = jugador_x + 8 + math.cos(brazo_angulo) * 15
-        brazo_y = jugador_y + 2 + math.sin(brazo_angulo) * 15
+        brazo_x = jugador_x + 8 + math.cos(brazo_angulo) * 18
+        brazo_y = jugador_y + 2 + math.sin(brazo_angulo) * 18
         pygame.draw.line(pantalla, (255, 180, 140), (int(jugador_x + 8), int(jugador_y + 2)), 
                         (int(brazo_x), int(brazo_y)), 4)
         
@@ -345,7 +345,7 @@ class Bote:
         punto_agarre_x = brazo_x
         punto_agarre_y = brazo_y
         
-        cana_largo = 90
+        cana_largo = 95
         # Calcular punto final con flexión
         x_cana = punto_agarre_x + math.cos(self.angulo_cana) * cana_largo * (1 - self.flexion_cana * 0.3)
         y_cana = punto_agarre_y + math.sin(self.angulo_cana) * cana_largo * (1 - self.flexion_cana * 0.2)
@@ -627,16 +627,24 @@ class Juego:
                     
                     # Calcular ángulo hacia el cursor
                     dx = mouse_x - self.bote.x
-                    dy = mouse_y - (self.bote.y - 15)
+                    dy = mouse_y - (self.bote.y - 70)
                     self.angulo_lanzamiento = math.atan2(dy, dx)
                     self.bote.angulo_cana = self.angulo_lanzamiento
+                
+                # Si está en estado LANZADO y presiona de nuevo, devuelve la caña
+                elif self.estado == EstadoJuego.LANZADO:
+                    self.estado = EstadoJuego.ESPERANDO
+                    self.linea = None
+                    self.bote.angulo_cana = self.angulo_cana_reposo
+                    self.bote.flexion_cana = 0
+                    self.bote.animando_lanzamiento = False
             
             if evento.type == pygame.MOUSEBUTTONUP:
                 self.mouse_presionado = False
                 
                 if self.estado == EstadoJuego.CARGANDO:
                     # Lanzar línea
-                    self.linea = Linea(self.bote.x, self.bote.y - 15, self.potencia, 
+                    self.linea = Linea(self.bote.x, self.bote.y - 70, self.potencia, 
                                       self.angulo_lanzamiento)
                     self.bote.iniciar_lanzamiento()
                     self.estado = EstadoJuego.LANZADO
@@ -644,7 +652,7 @@ class Juego:
             if evento.type == pygame.MOUSEMOTION and self.estado == EstadoJuego.CARGANDO:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
                 dx = mouse_x - self.bote.x
-                dy = mouse_y - (self.bote.y - 15)
+                dy = mouse_y - (self.bote.y - 70)
                 self.angulo_lanzamiento = math.atan2(dy, dx)
                 self.bote.angulo_cana = self.angulo_lanzamiento
         
