@@ -143,60 +143,82 @@ class Pez:
             pygame.draw.circle(pantalla, (50, 50, 50), (ojo_x, ojo_y), 2)
 
 class Linea:
-    def __init__(self, x_inicio, y_inicio, potencia, angulo):
+    def __init__(self, x_inicio, y_inicio, potencia, angulo, distancia_base=400):
         self.x_inicio = x_inicio
         self.y_inicio = y_inicio
         self.potencia = potencia  # 0 a 100
         self.angulo = angulo
-        
-        # Calcular distancia máxima basada en potencia
-        self.distancia_max = (potencia / 100) * 400
-        
-        # Posición actual del anzuelo
-        self.x_final = x_inicio + math.cos(angulo) * self.distancia_max
-        self.y_final = y_inicio + math.sin(angulo) * self.distancia_max
-        
-        self.en_agua = self.y_final > 350
+
+        # Distancia máxima calculada según potencia y base (puede crecer con mejoras)
+        self.distancia_max = (potencia / 100) * distancia_base
+
+        # Posición dinámica del anzuelo (inicia en la punta de la caña)
+        self.x_pos = x_inicio
+        self.y_pos = y_inicio
+
+        # Velocidad inicial basada en potencia (permite arco alto cuando potencia es alta)
+        max_speed = 40.0
+        speed = (potencia / 100) * max_speed
+        self.vx = math.cos(angulo) * speed
+        self.vy = math.sin(angulo) * speed
+
+        # En nuestro sistema Y crece hacia abajo; la gravedad la empuja hacia abajo
+        self.gravity = 0.9
+
+        self.en_agua = False
         self.pez_enganchado = None
         self.tiempo_linea = 0
-    
+
     def actualizar(self):
+        # Si el anzuelo no ha llegado al agua, actualizar física tipo proyectil
+        if not self.en_agua:
+            self.x_pos += self.vx
+            self.y_pos += self.vy
+            self.vy += self.gravity
+
+            # Distancia recorrida desde el inicio
+            distancia_recorrida = math.hypot(self.x_pos - self.x_inicio, self.y_pos - self.y_inicio)
+
+            # Si alcanza la distancia máxima forzamos que caiga al agua
+            if distancia_recorrida >= self.distancia_max or self.y_pos >= 350:
+                self.y_pos = min(self.y_pos, 350)
+                self.en_agua = True
+
+        # aumentar contador para ondulación cuando esté en agua o volando
         self.tiempo_linea += 1
-    
+
     def dibujar(self, pantalla):
-        # Línea de pesca con efecto de ondulación
+        # Dibujar la línea desde el inicio hasta la posición actual del anzuelo
         puntos = []
-        segmentos = 20
-        
+        segmentos = 22
+
+        x_final = int(self.x_pos)
+        y_final = int(self.y_pos)
+
         for i in range(segmentos + 1):
             t = i / segmentos
-            x = self.x_inicio + (self.x_final - self.x_inicio) * t
-            y = self.y_inicio + (self.y_final - self.y_inicio) * t
-            
-            # Agregamos ondulación a la línea
-            perpendicular_x = -(self.y_final - self.y_inicio) / (self.distancia_max + 1)
-            perpendicular_y = (self.x_final - self.x_inicio) / (self.distancia_max + 1)
-            
-            ondulacion = math.sin(self.tiempo_linea * 0.1 + i * 0.3) * 2
+            x = self.x_inicio + (x_final - self.x_inicio) * t
+            y = self.y_inicio + (y_final - self.y_inicio) * t
+
+            # Ondulación pequeña, independiente de la distancia cuando está en el aire
+            perpendicular_x = -(y_final - self.y_inicio) / (self.distancia_max + 1)
+            perpendicular_y = (x_final - self.x_inicio) / (self.distancia_max + 1)
+            ondulacion = math.sin(self.tiempo_linea * 0.12 + i * 0.35) * (2 if self.en_agua else 4 * (self.potencia/100))
             x += perpendicular_x * ondulacion
             y += perpendicular_y * ondulacion
-            
+
             puntos.append((int(x), int(y)))
-        
-        # Dibujar línea con gradiente de espesor
+
+        # Dibujar segmento de la línea
         for i in range(len(puntos) - 1):
             grosor = max(1, int(3 * (1 - i / len(puntos))))
             color_linea = (200 - (i * 2), 200 - (i * 2), 100 + (i // 2))
             pygame.draw.line(pantalla, color_linea, puntos[i], puntos[i + 1], grosor)
-        
-        # Dibujar anzuelo
-        # Cuerpo del anzuelo
-        pygame.draw.circle(pantalla, (200, 150, 50), (int(self.x_final), int(self.y_final)), 5)
-        # Gancho
-        pygame.draw.arc(pantalla, (100, 100, 100), (int(self.x_final - 6), int(self.y_final - 6), 12, 12), 
-                       math.pi * 0.3, math.pi * 1.7, 2)
-        # Brillo
-        pygame.draw.circle(pantalla, (255, 200, 100), (int(self.x_final), int(self.y_final)), 5, 1)
+
+        # Dibujar anzuelo en la posición actual
+        pygame.draw.circle(pantalla, (200, 150, 50), (x_final, y_final), 6)
+        pygame.draw.arc(pantalla, (100, 100, 100), (x_final - 7, y_final - 7, 14, 14), math.pi * 0.3, math.pi * 1.7, 2)
+        pygame.draw.circle(pantalla, (255, 200, 100), (x_final, y_final), 6, 1)
 
 class Bote:
     def __init__(self, x, y):
@@ -219,9 +241,10 @@ class Bote:
                            (int(x + i), int(y + alto)), 2)
     
     def dibujar(self, pantalla):
-        # Sombra del bote en el agua
-        pygame.draw.ellipse(pantalla, (0, 0, 0, 80), (self.x - self.ancho // 2 - 10, self.y + self.alto // 2 + 8, 
-                                                       self.ancho + 20, 15))
+        # Sombra del bote en el agua (más suave)
+        sombra_surf = pygame.Surface((self.ancho + 30, 20), pygame.SRCALPHA)
+        pygame.draw.ellipse(sombra_surf, (0, 0, 0, 90), (0, 0, self.ancho + 30, 20))
+        pantalla.blit(sombra_surf, (self.x - (self.ancho + 30) // 2 - 5, self.y + self.alto // 2 + 6))
         
         # Casco principal del bote (forma de bote real)
         casco_puntos = [
@@ -252,9 +275,10 @@ class Bote:
         ]
         pygame.draw.polygon(pantalla, (185, 110, 50), interior_puntos)
         
-        # Banda de color naranja en el bote (decorativa)
-        pygame.draw.line(pantalla, (255, 140, 0), (int(self.x - self.ancho // 2 + 10), int(self.y - self.alto // 2)),
-                        (int(self.x + self.ancho // 2 - 10), int(self.y - self.alto // 2)), 8)
+        # Banda de color naranja en el bote (decorativa) con brillo
+        banda_rect = (int(self.x - self.ancho // 2 + 10), int(self.y - self.alto // 2 - 4), int(self.ancho - 20), 12)
+        pygame.draw.rect(pantalla, (255, 140, 0), banda_rect, border_radius=6)
+        pygame.draw.rect(pantalla, (255, 200, 80), (banda_rect[0]+2, banda_rect[1]+1, banda_rect[2]-4, banda_rect[3]-4), border_radius=5)
         
         # Tablillas del fondo del bote
         for i in range(3):
@@ -263,83 +287,45 @@ class Bote:
                            (int(self.x - self.ancho // 3), int(y_tablilla)),
                            (int(self.x + self.ancho // 3), int(y_tablilla)), 4)
         
-        # Jugador sentado en el bote
-        jugador_x = self.x - 10
-        jugador_y = self.y - self.alto + 25
-        
-        # Piernas (sentado)
-        pygame.draw.line(pantalla, (40, 40, 100), (int(jugador_x - 3), int(jugador_y + 10)), 
-                        (int(jugador_x - 5), int(jugador_y + 25)), 4)
-        pygame.draw.line(pantalla, (40, 40, 100), (int(jugador_x + 3), int(jugador_y + 10)), 
-                        (int(jugador_x + 5), int(jugador_y + 25)), 4)
-        
-        # Torso (ropa verde)
-        pygame.draw.polygon(pantalla, (100, 150, 80), [
-            (int(jugador_x - 10), int(jugador_y)),
-            (int(jugador_x + 10), int(jugador_y)),
-            (int(jugador_x + 8), int(jugador_y + 15)),
-            (int(jugador_x - 8), int(jugador_y + 15))
-        ])
-        
-        # Brazos - Brazo izquierdo (hacia atrás, relajado)
-        pygame.draw.line(pantalla, (255, 180, 140), (int(jugador_x - 10), int(jugador_y + 2)), 
-                        (int(jugador_x - 20), int(jugador_y - 2)), 4)
-        
-        # Brazo derecho (sujetando caña, animado)
+        # Jugador sentado en el bote (mejorado - como la imagen)
+        jugador_x = self.x - 20
+        jugador_y = self.y - self.alto + 30
+
+        # Piernas y botas
+        pygame.draw.polygon(pantalla, (30, 60, 110), [(int(jugador_x - 8), int(jugador_y + 10)), (int(jugador_x - 2), int(jugador_y + 10)), (int(jugador_x - 4), int(jugador_y + 28)), (int(jugador_x - 10), int(jugador_y + 28))])
+        pygame.draw.polygon(pantalla, (30, 60, 110), [(int(jugador_x + 2), int(jugador_y + 10)), (int(jugador_x + 8), int(jugador_y + 10)), (int(jugador_x + 10), int(jugador_y + 28)), (int(jugador_x + 4), int(jugador_y + 28))])
+        pygame.draw.rect(pantalla, (80, 180, 100), (int(jugador_x - 10), int(jugador_y + 26), 10, 6), border_radius=2)
+        pygame.draw.rect(pantalla, (80, 180, 100), (int(jugador_x + 2), int(jugador_y + 26), 10, 6), border_radius=2)
+
+        # Torso con capucha
+        hood_rect = (int(jugador_x - 14), int(jugador_y - 6), 28, 22)
+        pygame.draw.ellipse(pantalla, (95, 145, 75), hood_rect)
+        pygame.draw.rect(pantalla, (90, 140, 70), (int(jugador_x - 12), int(jugador_y+2), 24, 16), border_radius=4)
+        pygame.draw.line(pantalla, (70, 110, 60), (int(jugador_x - 6), int(jugador_y+6)), (int(jugador_x + 6), int(jugador_y+6)), 2)
+
+        # Brazo izquierdo relajado
+        pygame.draw.line(pantalla, (255, 200, 160), (int(jugador_x - 8), int(jugador_y + 6)), (int(jugador_x - 20), int(jugador_y + 2)), 5)
+
+        # Brazo derecho (sujetando caña)
         if self.animando_lanzamiento:
-            # Animación de lanzamiento
             progreso = self.tiempo_lanzamiento / 30
             brazo_angulo = -math.pi / 2.5 - (math.pi / 2.2) * progreso
         else:
             brazo_angulo = -math.pi / 2.5
-        
+
         brazo_x = jugador_x + 8 + math.cos(brazo_angulo) * 18
         brazo_y = jugador_y + 2 + math.sin(brazo_angulo) * 18
-        pygame.draw.line(pantalla, (255, 180, 140), (int(jugador_x + 8), int(jugador_y + 2)), 
-                        (int(brazo_x), int(brazo_y)), 4)
-        
-        # Mano derecha (círculo pequeño)
+        pygame.draw.line(pantalla, (255, 200, 160), (int(jugador_x + 8), int(jugador_y + 2)), (int(brazo_x), int(brazo_y)), 4)
         pygame.draw.circle(pantalla, (255, 200, 160), (int(brazo_x), int(brazo_y)), 3)
-        
-        # Cabeza
-        pygame.draw.circle(pantalla, (255, 200, 160), (int(jugador_x), int(jugador_y - 15)), 10)
-        
-        # Barba marrón oscuro
-        pygame.draw.polygon(pantalla, (100, 50, 30), [
-            (int(jugador_x - 6), int(jugador_y - 7)),
-            (int(jugador_x + 6), int(jugador_y - 7)),
-            (int(jugador_x + 5), int(jugador_y - 1)),
-            (int(jugador_x - 5), int(jugador_y - 1))
-        ])
-        
-        # Líneas de barba
-        pygame.draw.line(pantalla, (80, 40, 20), (int(jugador_x - 4), int(jugador_y - 3)),
-                        (int(jugador_x - 3), int(jugador_y + 2)), 1)
-        pygame.draw.line(pantalla, (80, 40, 20), (int(jugador_x), int(jugador_y - 3)),
-                        (int(jugador_x), int(jugador_y + 2)), 1)
-        pygame.draw.line(pantalla, (80, 40, 20), (int(jugador_x + 4), int(jugador_y - 3)),
-                        (int(jugador_x + 3), int(jugador_y + 2)), 1)
-        
-        # Ojos
-        pygame.draw.circle(pantalla, (50, 50, 50), (int(jugador_x - 3), int(jugador_y - 18)), 2)
-        pygame.draw.circle(pantalla, (50, 50, 50), (int(jugador_x + 3), int(jugador_y - 18)), 2)
-        
-        # Gorro/Sombrero naranja
-        gorro_puntos = [
-            (int(jugador_x - 12), int(jugador_y - 26)),
-            (int(jugador_x + 12), int(jugador_y - 26)),
-            (int(jugador_x + 10), int(jugador_y - 20)),
-            (int(jugador_x - 10), int(jugador_y - 20))
-        ]
-        pygame.draw.polygon(pantalla, (255, 140, 0), gorro_puntos)
-        
-        # Visera del gorro
-        pygame.draw.polygon(pantalla, (255, 150, 20), [
-            (int(jugador_x - 10), int(jugador_y - 20)),
-            (int(jugador_x + 10), int(jugador_y - 20)),
-            (int(jugador_x + 12), int(jugador_y - 18)),
-            (int(jugador_x - 12), int(jugador_y - 18))
-        ])
+
+        # Cabeza, barba y gorro
+        pygame.draw.circle(pantalla, (255, 205, 170), (int(jugador_x), int(jugador_y - 18)), 10)
+        pygame.draw.ellipse(pantalla, (110, 60, 30), (int(jugador_x - 8), int(jugador_y - 8), 16, 12))
+        pygame.draw.polygon(pantalla, (95, 50, 25), [(int(jugador_x - 8), int(jugador_y - 2)), (int(jugador_x + 8), int(jugador_y - 2)), (int(jugador_x + 4), int(jugador_y + 4)), (int(jugador_x - 4), int(jugador_y + 4))])
+        pygame.draw.circle(pantalla, (50, 50, 50), (int(jugador_x - 3), int(jugador_y - 20)), 2)
+        pygame.draw.circle(pantalla, (50, 50, 50), (int(jugador_x + 3), int(jugador_y - 20)), 2)
+        pygame.draw.ellipse(pantalla, (245, 200, 80), (int(jugador_x - 14), int(jugador_y - 30), 28, 14))
+        pygame.draw.polygon(pantalla, (245, 195, 70), [(int(jugador_x - 16), int(jugador_y - 24)), (int(jugador_x + 16), int(jugador_y - 24)), (int(jugador_x + 12), int(jugador_y - 18)), (int(jugador_x - 12), int(jugador_y - 18))])
         
         # Caña de pescar
         punto_agarre_x = brazo_x
@@ -377,9 +363,15 @@ class Bote:
                            (int(x_end), int(y_end)), 1)
     
     def iniciar_lanzamiento(self):
-        """Inicia la animación de lanzamiento"""
+        """Inicia la animación de lanzamiento; potencia influye en la flexión."""
         self.animando_lanzamiento = True
         self.tiempo_lanzamiento = 0
+        # la flexión inicial depende de la potencia (si se pasa en el atributo antes de llamar)
+        try:
+            potencia = getattr(self, 'potencia_lanzamiento', 50)
+            self.flexion_cana = min(1.0, potencia / 100)
+        except Exception:
+            self.flexion_cana = 0.5
     
     def actualizar_lanzamiento(self):
         """Actualiza la animación de lanzamiento"""
@@ -403,19 +395,29 @@ class Juego:
         self.incremento_potencia = 1.5
         self.angulo_cana_reposo = -math.pi / 2.5  # Ángulo de reposo de la caña
         
-        self.bote = Bote(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 120)
+        # posicionar el bote a la izquierda como en la referencia
+        self.bote = Bote(140, SCREEN_HEIGHT - 120)
         self.bote.angulo_cana = self.angulo_cana_reposo  # Posición inicial
+        # Referencia al juego para que el bote pueda saber si hay línea lanzada
+        self.bote.game_ref = self
         self.linea = None
         self.peces = []
         self.generar_peces(10)
         
         self.pescados = 0
-        self.puntos = 0
+        self.monedas = 0
+        self.moneda_por_pez = 10
         self.mensaje = ""
         self.tiempo_mensaje = 0
         
         self.mouse_presionado = False
         self.angulo_lanzamiento = self.angulo_cana_reposo
+        # Shop / upgrades
+        self.shop_open = False
+        self.tienda_rect = pygame.Rect(SCREEN_WIDTH - 90, 20, 70, 60)
+        self.upgrades = {'distancia': 0, 'fuerza': 0, 'peso': 0}
+        self.upgrade_costs = {'distancia': 25, 'fuerza': 30, 'peso': 15}
+        self.base_distance = 400
     
     def generar_peces(self, cantidad):
         self.peces = []
@@ -455,9 +457,11 @@ class Juego:
             # Verificar colisión con peces
             for pez in self.peces:
                 if pez.vivo:
-                    distancia = math.hypot(pez.x - self.linea.x_final, 
-                                         pez.y - self.linea.y_final)
-                    if distancia < pez.radio + 5:
+                    # usar posición dinámica del anzuelo (x_pos, y_pos)
+                    distancia = math.hypot(pez.x - getattr(self.linea, 'x_pos', getattr(self.linea, 'x_final', 0)), 
+                                         pez.y - getattr(self.linea, 'y_pos', getattr(self.linea, 'y_final', 0)))
+                    extra_hook = 5 + self.upgrades.get('peso', 0) * 3
+                    if distancia < pez.radio + extra_hook:
                         self.linea.pez_enganchado = pez
                         self.estado = EstadoJuego.PESCANDO
                         break
@@ -465,18 +469,20 @@ class Juego:
         # Retirar línea si se presiona click
         if self.estado == EstadoJuego.PESCANDO:
             if not self.mouse_presionado:
-                pez = self.linea.pez_enganchado
+                pez = None
+                if self.linea:
+                    pez = self.linea.pez_enganchado
                 if pez:
                     pez.vivo = False
                     self.pescados += 1
-                    self.puntos += 10
-                    self.mensaje = f"+10 puntos! Pescados: {self.pescados}"
+                    self.monedas += self.moneda_por_pez
+                    self.mensaje = f"+{self.moneda_por_pez} monedas! Pescados: {self.pescados}"
                     self.tiempo_mensaje = 120
-                    
+
                     # Generar nuevo pez
                     self.peces.append(Pez(random.randint(150, SCREEN_WIDTH - 150),
                                          random.randint(420, SCREEN_HEIGHT - 80)))
-                
+
                 self.estado = EstadoJuego.ESPERANDO
                 self.bote.flexion_cana = 0
                 self.linea = None
@@ -495,7 +501,69 @@ class Juego:
             )
             pygame.draw.line(self.pantalla, color_cielo, (0, y), (SCREEN_WIDTH, y))
         
-        # Nubes (decorativas)
+        # Escala superior y temporizador
+        self.dibujar_escala_timer()
+
+        # UI de costos (burbujas izquierda)
+        self.dibujar_ui_burbujas()
+
+        # Sol grande en el horizonte (semi-sumergido)
+        sol_x = SCREEN_WIDTH // 2 + 150
+        sol_y = 350 + 60
+        sol_radio = 180
+        sol_surf = pygame.Surface((sol_radio*2, sol_radio*2), pygame.SRCALPHA)
+        pygame.draw.circle(sol_surf, (250, 250, 70, 230), (sol_radio, sol_radio), sol_radio)
+        # recortar la parte superior para simular sol detrás del horizonte
+        self.pantalla.blit(sol_surf, (sol_x - sol_radio, sol_y - sol_radio + 20))
+
+        # Boya cerca del sol (posicionada como en la referencia)
+        try:
+            self.dibujar_boya(sol_x - 80, sol_y)
+        except Exception:
+            pass
+
+        # Icono de tienda (simple)
+        # Icono de tienda (estilizado como en la referencia)
+        tienda_w, tienda_h = 70, 60
+        tienda_x = SCREEN_WIDTH - tienda_w - 20
+        tienda_y = 20
+        # Fondo azul con borde negro grueso
+        pygame.draw.rect(self.pantalla, (30, 140, 240), (tienda_x, tienda_y, tienda_w, tienda_h), border_radius=8)
+        pygame.draw.rect(self.pantalla, (0,0,0), (tienda_x, tienda_y, tienda_w, tienda_h), 4, border_radius=8)
+        # Tejadillo rojo/white
+        roof = [(tienda_x + 8, tienda_y + 14), (tienda_x + tienda_w//2, tienda_y - 8), (tienda_x + tienda_w - 8, tienda_y + 14)]
+        pygame.draw.polygon(self.pantalla, (220,30,30), roof)
+        # Rayas blancas en el tejado
+        pygame.draw.line(self.pantalla, (255,255,255), (tienda_x + 14, tienda_y + 8), (tienda_x + tienda_w//2, tienda_y + 2), 3)
+        pygame.draw.line(self.pantalla, (255,255,255), (tienda_x + tienda_w - 14, tienda_y + 8), (tienda_x + tienda_w//2, tienda_y + 2), 3)
+        texto_shop = self.fuente_pequeña.render("shop", True, BLANCO)
+        self.pantalla.blit(texto_shop, (tienda_x+12, tienda_y + tienda_h - 26))
+
+        # Si la tienda está abierta, dibujar overlay con botones de compra
+        if self.shop_open:
+            shop_w, shop_h = 260, 240
+            shop_x = SCREEN_WIDTH // 2 - shop_w // 2
+            shop_y = SCREEN_HEIGHT // 2 - shop_h // 2
+            pygame.draw.rect(self.pantalla, (30, 30, 40), (shop_x, shop_y, shop_w, shop_h), border_radius=8)
+            pygame.draw.rect(self.pantalla, (200, 200, 200), (shop_x+4, shop_y+4, shop_w-8, shop_h-8), 2, border_radius=6)
+
+            title = self.fuente.render("Tienda de mejoras", True, (240, 240, 240))
+            self.pantalla.blit(title, (shop_x + 18, shop_y + 10))
+
+            # Botones de compra
+            btn_w, btn_h = 220, 40
+            padding = 12
+            bx = shop_x + 20
+            by = shop_y + 50
+            keys = list(self.upgrades.keys())
+            for i, key in enumerate(keys):
+                rect = pygame.Rect(bx, by + i * (btn_h + padding), btn_w, btn_h)
+                pygame.draw.rect(self.pantalla, (50, 80, 120), rect, border_radius=6)
+                cost = self.upgrade_costs.get(key, 0)
+                lvl = self.upgrades.get(key, 0)
+                texto = self.fuente_pequeña.render(f"{key.capitalize()} Lv{lvl} - {cost} monedas", True, BLANCO)
+                self.pantalla.blit(texto, (rect.x + 12, rect.y + 8))
+
         self.dibujar_nubes()
         
         # Línea del horizonte (agua)
@@ -524,6 +592,21 @@ class Juego:
         # Dibujar línea si existe
         if self.linea:
             self.linea.dibujar(self.pantalla)
+        else:
+            # Si no hay línea lanzada, dibujar una línea vertical fina desde la punta de la caña al agua
+            # (esto hace que la escena se parezca a la imagen con la línea colgando)
+            try:
+                # Intentar obtener la punta de la caña desde el bote
+                punto_agarre_x = None
+                punto_agarre_y = None
+                # calculamos punto final de caña según bote
+                punto_agarre_x = self.bote.x + 8 + math.cos(self.bote.angulo_cana) * 18
+                punto_agarre_y = (self.bote.y - self.bote.alto + 30) + math.sin(self.bote.angulo_cana) * 18
+                y_superficie = 350
+                pygame.draw.line(self.pantalla, (170, 170, 180), (int(punto_agarre_x), int(punto_agarre_y)), (int(punto_agarre_x), y_superficie), 2)
+                pygame.draw.circle(self.pantalla, (200,160,80), (int(punto_agarre_x), y_superficie), 3)
+            except Exception:
+                pass
         
         # Panel de interfaz (semi-transparente)
         panel_surf = pygame.Surface((SCREEN_WIDTH, 100))
@@ -565,10 +648,10 @@ class Juego:
         stats_y = 15
         
         texto_pescados = self.fuente.render(f"🎣 Pescados: {self.pescados}", True, (255, 200, 0))
-        texto_puntos = self.fuente.render(f"⭐ Puntos: {self.puntos}", True, (255, 200, 0))
-        
+        texto_monedas = self.fuente.render(f"🪙 Monedas: {self.monedas}", True, (255, 200, 0))
+
         self.pantalla.blit(texto_pescados, (stats_x, stats_y))
-        self.pantalla.blit(texto_puntos, (stats_x, stats_y + 35))
+        self.pantalla.blit(texto_monedas, (stats_x, stats_y + 35))
         
         # Dibujar mensaje de logro
         if self.tiempo_mensaje > 0:
@@ -599,17 +682,106 @@ class Juego:
             pygame.draw.circle(self.pantalla, (255, 255, 255), (x, y), size)
             pygame.draw.circle(self.pantalla, (255, 255, 255), (x + size // 2, y - 10), size - 5)
             pygame.draw.circle(self.pantalla, (255, 255, 255), (x + size, y), size)
+
+    def dibujar_ui_burbujas(self):
+        # Burbujas de UI a la izquierda con costos
+        x = 30
+        y = 60
+        w = 220
+        h = 56
+        shadow_off = 6
+
+        # Distancia - azul (blob con sombra)
+        pygame.draw.ellipse(self.pantalla, (20, 20, 60), (x - 6 + shadow_off, y - 6 + shadow_off, w + 12, h + 12))
+        pygame.draw.ellipse(self.pantalla, (30, 170, 240), (x - 6, y - 6, w + 12, h + 12))
+        pygame.draw.ellipse(self.pantalla, (10, 10, 30), (x - 6, y - 6, w + 12, h + 12), 2)
+        t = self.fuente_pequeña.render("distancia = 25 monedas", True, (10,10,30))
+        self.pantalla.blit(t, (x + 10, y + 12))
+
+        # Fuerza - rojo
+        y += 80
+        pygame.draw.ellipse(self.pantalla, (20, 20, 60), (x - 6 + shadow_off, y - 6 + shadow_off, w + 12, h + 12))
+        pygame.draw.ellipse(self.pantalla, (220, 40, 40), (x - 6, y - 6, w + 12, h + 12))
+        pygame.draw.ellipse(self.pantalla, (255,255,255), (x - 6, y - 6, w + 12, h + 12), 2)
+        t2 = self.fuente_pequeña.render("fuerza = 30 monedas", True, (255,255,255))
+        self.pantalla.blit(t2, (x + 10, y + 12))
+
+        # Peso - naranja
+        y += 80
+        pygame.draw.ellipse(self.pantalla, (20, 20, 60), (x - 6 + shadow_off, y - 6 + shadow_off, w + 12, h + 12))
+        pygame.draw.ellipse(self.pantalla, (255, 140, 0), (x - 6, y - 6, w + 12, h + 12))
+        pygame.draw.ellipse(self.pantalla, (10,10,30), (x - 6, y - 6, w + 12, h + 12), 2)
+        t3 = self.fuente_pequeña.render("peso = 15 monedas", True, (10,10,30))
+        self.pantalla.blit(t3, (x + 10, y + 12))
+
+    def dibujar_escala_timer(self):
+        # Barra superior gruesa estilo dibujo (negra) con marcas y un marcador amarillo
+        y = 24
+        left = 80
+        right = SCREEN_WIDTH - 80
+        pygame.draw.line(self.pantalla, (10,10,10), (left, y), (right, y), 10)
+
+        # Marcas verticales negras (estilo hecho a mano)
+        pasos = 6
+        for i in range(pasos + 1):
+            x = int(left + (right - left) * i / pasos)
+            pygame.draw.line(self.pantalla, (10,10,10), (x, y - 28), (x, y + 28), 6)
+
+        # Marcador amarillo dinámico que indica qué tan profundo/alejado se lanzará
+        # Mientras cargas, se basa en la potencia; si ya lanzaste, refleja la distancia objetivo
+        if self.estado == EstadoJuego.CARGANDO:
+            frac = self.potencia / 100
+        elif self.linea:
+            # línea puede no haber llegado al agua aún, usamos distancia_max relativa a base
+            frac = min(1.0, max(0.0, self.linea.distancia_max / max(1, self.base_distance)))
+        else:
+            frac = 0.05
+
+        marker_x = int(left +  (right - left) * frac)
+        pygame.draw.circle(self.pantalla, (250, 230, 80), (marker_x, y), 18)
+        pygame.draw.circle(self.pantalla, (10,10,10), (marker_x, y), 18, 3)
+
+    def dibujar_boya(self, cx, cy):
+        # Boya colorida (estimación de la imagen) - bandas y rotación
+        boya_surf = pygame.Surface((120, 80), pygame.SRCALPHA)
+        # Dibujar bandas
+        pygame.draw.ellipse(boya_surf, (200,20,20), (6, 6, 108, 68))
+        pygame.draw.ellipse(boya_surf, (20,20,200), (18, 16, 84, 48))
+        pygame.draw.ellipse(boya_surf, (60,200,80), (32, 24, 56, 32))
+        # borde
+        pygame.draw.ellipse(boya_surf, (10,10,10), (6,6,108,68), 3)
+        rot = pygame.transform.rotate(boya_surf, -25)
+        self.pantalla.blit(rot, (cx - rot.get_width()//2, cy - rot.get_height()//2))
     
     def dibujar_ondas(self):
-        # Ondas en la superficie del agua
+        # Ondas en la superficie del agua con reflejos
         frame = int(pygame.time.get_ticks() / 50) % 100
-        
-        for i in range(3):
+
+        for i in range(4):
             fase = (frame + i * 30) / 100
-            amplitud = 3 * (1 - abs(fase - 0.5) * 2)
-            
+            amplitud = 3 + i
             y = 350 + int(amplitud * math.sin(fase * math.pi * 2))
-            pygame.draw.line(self.pantalla, (100, 180, 220), (0, y), (SCREEN_WIDTH, y), 1)
+            color = (90 + i*10, 170 + i*10, 210 + i*5)
+            pygame.draw.line(self.pantalla, color, (0, y), (SCREEN_WIDTH, y), 1)
+
+        # Reflejos suaves del sol en el agua (si el sol está presente)
+        try:
+            sol_x = SCREEN_WIDTH // 2 + 150
+            for r in range(3):
+                alpha = max(20, 120 - r * 30)
+                width = 380 - r * 80
+                refl = pygame.Surface((width, 24), pygame.SRCALPHA)
+                pygame.draw.ellipse(refl, (250, 250, 120, alpha), (0, 0, width, 20))
+                self.pantalla.blit(refl, (sol_x - width//2 + r*6, 360 + r*6))
+        except Exception:
+            pass
+
+        # Pequeños destellos móviles
+        ticks = int(pygame.time.get_ticks() / 120)
+        for i in range(0, SCREEN_WIDTH, 140):
+            x = (i + ticks) % SCREEN_WIDTH
+            y = 362 + int(math.sin((i + ticks) * 0.02) * 3)
+            pygame.draw.aaline(self.pantalla, (200, 230, 255), (x, y), (x + 20, y))
     
     def manejar_eventos(self):
         for evento in pygame.event.get():
@@ -618,16 +790,54 @@ class Juego:
             
             if evento.type == pygame.MOUSEBUTTONDOWN:
                 self.mouse_presionado = True
-                mouse_x, mouse_y = pygame.mouse.get_pos()
-                
+                mx, my = pygame.mouse.get_pos()
+
+                # Priorizar interacción con la tienda
+                if self.tienda_rect.collidepoint(mx, my):
+                    self.shop_open = not self.shop_open
+                    continue
+
+                if self.shop_open:
+                    # manejar clicks dentro de la UI de la tienda
+                    shop_w, shop_h = 260, 240
+                    shop_x = SCREEN_WIDTH // 2 - shop_w // 2
+                    shop_y = SCREEN_HEIGHT // 2 - shop_h // 2
+                    btn_w, btn_h = 220, 40
+                    padding = 12
+                    bx = shop_x + 20
+                    by = shop_y + 50
+                    keys = list(self.upgrades.keys())
+                    for i, key in enumerate(keys):
+                        rect = pygame.Rect(bx, by + i * (btn_h + padding), btn_w, btn_h)
+                        if rect.collidepoint(mx, my):
+                            cost = self.upgrade_costs.get(key, 0)
+                            if self.monedas >= cost:
+                                self.monedas -= cost
+                                self.upgrades[key] += 1
+                                # aplicar efecto inmediato
+                                if key == 'distancia':
+                                    self.base_distance += 100
+                                if key == 'fuerza':
+                                    self.moneda_por_pez += 5
+                                # peso ya afecta el radio de anzuelo en actualizar
+                                self.mensaje = f"Compraste {key}!"
+                                self.tiempo_mensaje = 90
+                            else:
+                                self.mensaje = "Monedas insuficientes"
+                                self.tiempo_mensaje = 90
+                            self.shop_open = False
+                            break
+                    continue
+
+                # Si no se interactuó con la tienda, proceder con el juego
                 if self.estado == EstadoJuego.ESPERANDO:
                     self.estado = EstadoJuego.CARGANDO
                     self.potencia = 0
                     self.incremento_potencia = 1.5
                     
                     # Calcular ángulo hacia el cursor
-                    dx = mouse_x - self.bote.x
-                    dy = mouse_y - (self.bote.y - 70)
+                    dx = mx - self.bote.x
+                    dy = my - (self.bote.y - 70)
                     self.angulo_lanzamiento = math.atan2(dy, dx)
                     self.bote.angulo_cana = self.angulo_lanzamiento
                 
@@ -644,8 +854,9 @@ class Juego:
                 
                 if self.estado == EstadoJuego.CARGANDO:
                     # Lanzar línea
-                    self.linea = Linea(self.bote.x, self.bote.y - 70, self.potencia, 
-                                      self.angulo_lanzamiento)
+                    # Ajustar distancia base según mejoras
+                    distancia_base = self.base_distance + self.upgrades['distancia'] * 100
+                    self.linea = Linea(self.bote.x, self.bote.y - 70, self.potencia, self.angulo_lanzamiento, distancia_base)
                     self.bote.iniciar_lanzamiento()
                     self.estado = EstadoJuego.LANZADO
             
