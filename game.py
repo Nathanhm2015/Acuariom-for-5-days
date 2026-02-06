@@ -251,12 +251,32 @@ class Bote:
         punto_agarre_y = jugador_y + 2
 
         cana_largo = 95
-        x_cana = punto_agarre_x + math.cos(self.angulo_cana) * cana_largo * (1 - self.flexion_cana * 0.3)
-        y_cana = punto_agarre_y + math.sin(self.angulo_cana) * cana_largo * (1 - self.flexion_cana * 0.2)
+        # Si el bote tiene referencia al juego y hay una línea lanzada, apuntar la caña al anzuelo
+        ang_actual = self.angulo_cana
+        try:
+            if hasattr(self, 'game_ref') and self.game_ref and self.game_ref.linea:
+                lx = self.game_ref.linea.x_pos
+                ly = self.game_ref.linea.y_pos
+                ang_actual = math.atan2(ly - punto_agarre_y, lx - punto_agarre_x)
+        except Exception:
+            ang_actual = self.angulo_cana
 
-        # Línea de la caña
-        pygame.draw.line(pantalla, (100, 60, 30), (int(punto_agarre_x), int(punto_agarre_y)),
+        x_cana = punto_agarre_x + math.cos(ang_actual) * cana_largo * (1 - self.flexion_cana * 0.3)
+        y_cana = punto_agarre_y + math.sin(ang_actual) * cana_largo * (1 - self.flexion_cana * 0.2)
+        # Línea de la caña - dibujamos con contorno para mayor visibilidad
+        pygame.draw.line(pantalla, NEGRO, (int(punto_agarre_x), int(punto_agarre_y)),
+                        (int(x_cana), int(y_cana)), 5)
+        pygame.draw.line(pantalla, (120, 80, 50), (int(punto_agarre_x), int(punto_agarre_y)),
                         (int(x_cana), int(y_cana)), 3)
+
+        # Dibujar línea de pesca conectando al anzuelo si existe
+        try:
+            if hasattr(self, 'game_ref') and self.game_ref and self.game_ref.linea:
+                hook_x = int(self.game_ref.linea.x_pos)
+                hook_y = int(self.game_ref.linea.y_pos)
+                pygame.draw.line(pantalla, NEGRO, (int(punto_agarre_x), int(punto_agarre_y)), (hook_x, hook_y), 1)
+        except Exception:
+            pass
 
     def iniciar_lanzamiento(self):
         self.animando_lanzamiento = True
@@ -371,6 +391,32 @@ class Juego:
             profundidad_px = self.linea.y_pos - 350
             self.profundidad_actual = max(0, profundidad_px / (SCREEN_HEIGHT - 350) * 200)
 
+            # Reeling: si el jugador mantiene el click mientras la línea está lanzada, acercar el anzuelo
+            if self.mouse_presionado and self.estado in (EstadoJuego.LANZADO, EstadoJuego.PESCANDO):
+                # velocidad base de reel (pixeles por update)
+                base_reel = 2.0
+                fuerza = 1.0 + self.upgrades.get('strength', 0) * 0.25
+                velocidad = base_reel * fuerza
+                # acercar la posición del anzuelo hacia el bote
+                dir_x = (self.bote.x - self.linea.x_pos)
+                dir_y = ((self.bote.y - 70) - self.linea.y_pos)
+                dist = math.hypot(dir_x, dir_y) + 0.001
+                self.linea.x_pos += dir_x / dist * velocidad
+                self.linea.y_pos += dir_y / dist * velocidad
+                # agregar burbujas mientras reeleando
+                if random.random() < 0.08:
+                    self.agregar_particula(self.linea.x_pos, self.linea.y_pos, 'burbuja')
+
+                # Si la línea llega cerca del bote, recuperarla automáticamente
+                if math.hypot(self.linea.x_pos - self.bote.x, self.linea.y_pos - (self.bote.y - 70)) < 30:
+                    # si hay pez enganchado, pasar a PESCANDO para permitir retirar
+                    if self.linea.pez_enganchado:
+                        self.estado = EstadoJuego.PESCANDO
+                    else:
+                        self.linea = None
+                        self.estado = EstadoJuego.ESPERANDO
+                        self.bote.flexion_cana = 0
+
         if self.estado == EstadoJuego.CARGANDO:
             self.potencia = min(100, self.potencia + self.incremento_potencia)
             self.bote.flexion_cana = self.potencia / 100
@@ -478,12 +524,12 @@ class Juego:
         for pez in self.peces:
             pez.dibujar(self.pantalla)
 
-        # Bote
-        self.bote.dibujar(self.pantalla)
-
-        # Línea
+        # Línea (dibujamos la línea antes del bote para que la caña esté encima)
         if self.linea:
             self.linea.dibujar(self.pantalla)
+
+        # Bote (dibujar al final para que la caña quede visible encima de la línea)
+        self.bote.dibujar(self.pantalla)
 
         # Panel de interfaz superior oscuro
         panel_surf = pygame.Surface((SCREEN_WIDTH, 90))
@@ -534,7 +580,6 @@ class Juego:
             # Pequeño hueco
             pygame.draw.circle(self.pantalla, (60, 60, 60), (rx - size//3, ry - size//3), size//4)
 
-        pygame.display.flip()
     
     def dibujar_nubes(self):
         # Nubes simples (círculos)
@@ -609,7 +654,7 @@ class Juego:
         if self.estado == EstadoJuego.CARGANDO:
             relleno_ancho = (self.potencia / 100) * medidor_ancho
             
-            # Colores según potencia (rojo malo, amarillo medio, verde perfecto)
+            # Colores según potencia (verde perfecto, amarillo medio, rojo exceso)
             if self.potencia < 33:
                 color_relleno = (0, 200, 100)  # Verde
             elif self.potencia < 66:
@@ -637,6 +682,30 @@ class Juego:
             else:
                 zona_texto = self.fuente_pequeña.render("Too much!", True, (255, 0, 0))
             self.pantalla.blit(zona_texto, (medidor_x + medidor_ancho + 10, medidor_y + 30))
+
+            # Arco visual de lanzamiento (fan) alrededor de la caña
+            try:
+                center_x = int(self.bote.x + 8)
+                center_y = int(self.bote.y - self.bote.alto + 30 + 2)
+                radius = 120
+                ang = self.angulo_lanzamiento
+                span = 1.2
+                # tres zonas: buena (verde), media (amarillo), mala (rojo)
+                zones = [(-span/2, -span/6, (0,200,100,90)), (-span/6, span/6, (255,200,0,90)), (span/6, span/2, (255,0,0,90))]
+                for a0, a1, col in zones:
+                    pts = [(center_x, center_y)]
+                    steps = 18
+                    for i in range(steps+1):
+                        t = a0 + (a1 - a0) * (i/steps)
+                        a = ang + t
+                        x = center_x + math.cos(a) * radius
+                        y = center_y + math.sin(a) * radius
+                        pts.append((int(x), int(y)))
+                    s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+                    pygame.draw.polygon(s, col, pts)
+                    self.pantalla.blit(s, (0,0))
+            except Exception:
+                pass
         else:
             if self.estado == EstadoJuego.ESPERANDO:
                 texto_estado = self.fuente_pequeña.render("Haz CLICK y mantén para cargar", True, BLANCO)
@@ -663,6 +732,10 @@ class Juego:
         if self.profundidad_actual > 0:
             relleno_prof = (self.profundidad_actual / 200) * barra_prof_h
             pygame.draw.rect(self.pantalla, (100, 200, 255), (prof_x + 110, prof_y + barra_prof_h - relleno_prof, barra_prof_w, relleno_prof))
+
+        # Profundidad grande arriba en el centro (ej. '89 ft')
+        profundidad_texto = self.fuente_titulo.render(f"{int(self.profundidad_actual)} ft", True, (30, 140, 200))
+        self.pantalla.blit(profundidad_texto, (SCREEN_WIDTH//2 - profundidad_texto.get_width()//2, 10))
 
         # Estadísticas - Centro
         stats_x = SCREEN_WIDTH // 2 - 100
@@ -781,7 +854,6 @@ class Juego:
             texto = self.fuente_pequeña.render(btn['label'], True, BLANCO)
             self.pantalla.blit(texto, (rect.x + 20, rect.y + 12))
         
-        pygame.display.flip()
 
     def manejar_eventos(self):
         for evento in pygame.event.get():
