@@ -508,6 +508,16 @@ class Juego:
             )
             pygame.draw.line(self.pantalla, color_agua, (0, y), (SCREEN_WIDTH, y))
 
+        # Olas sutiles en la superficie (superposición semi-transparente)
+        wave_surf = pygame.Surface((SCREEN_WIDTH, 60), pygame.SRCALPHA)
+        ticks = pygame.time.get_ticks() / 500.0
+        for x in range(0, SCREEN_WIDTH, 6):
+            y_off = math.sin((x / 60.0) + ticks) * 6
+            alpha = 40 + int(30 * math.sin((x / 120.0) + ticks * 0.5))
+            color = (255, 255, 255, max(10, alpha))
+            pygame.draw.circle(wave_surf, color, (x, int(30 + y_off)), 4)
+        self.pantalla.blit(wave_surf, (0, 340))
+
         # Rocas submarinas
         self.dibujar_rocas()
 
