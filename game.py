@@ -475,7 +475,7 @@ class Juego:
         item_h = 65
         
         mejoras = [
-            ('strength', 'STRENGTH', '🔧', (180, 80, 80), 'Fisherman is 25% stronger'),
+            ('strength', 'STRENGTH', '🔧', (180, 80, 80), 'Hook flies 5% further'),
             ('weight', 'WEIGHT', '⚓', (80, 160, 180), 'Hook sinks 15% deeper'),
             ('rebound', 'REBOUND', '↺', (80, 180, 80), 'Hook bounces 5% better'),
             ('resistance', 'RESISTANCE', '🛡', (200, 140, 80), 'Hook up to 1 more fishes'),
@@ -1247,7 +1247,8 @@ class Juego:
                     dy = mouse_y - (self.bote.y - 70)
                     self.angulo_lanzamiento = math.atan2(dy, dx)
                     
-                    distancia_base = self.base_distance + self.upgrades.get('strength', 0) * 100
+                    # Strength aumenta 5% la distancia por nivel
+                    distancia_base = self.base_distance * (1 + self.upgrades.get('strength', 0) * 0.05)
                     self.linea = Linea(self.bote.x, self.bote.y - 70, self.potencia,
                                       self.angulo_lanzamiento, distancia_base)
                     self.bote.iniciar_lanzamiento()
