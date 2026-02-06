@@ -371,6 +371,11 @@ class Juego:
         
         # Partículas (burbujas, chispas)
         self.particulas = []
+        
+        # Sistema de anuncios
+        self.anuncio_tiempo = 0
+        self.anuncio_duracion = 300  # 5 segundos a 60 FPS
+        self.anuncio_mejora_pendiente = None
 
     def generar_peces(self, cantidad):
         self.peces = []
