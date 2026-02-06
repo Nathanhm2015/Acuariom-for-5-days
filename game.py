@@ -145,12 +145,15 @@ class Linea:
 
         self.en_agua = False
         self.pez_enganchado = None
+        self.peces_enganchados = []  # Lista para múltiples peces
         self.tiempo_linea = 0
         self.llegado = False
+        self.rebotando = False
+        self.rebound_count = 0
 
-    def actualizar(self):
+    def actualizar(self, weight_level=0, rebound_level=0):
         # Movimiento directo hacia el objetivo
-        if not self.llegado:
+        if not self.llegado and not self.rebotando:
             # Calcular distancia al objetivo
             dx = self.target_x - self.x_pos
             dy = self.target_y - self.y_pos
@@ -172,13 +175,35 @@ class Linea:
             if self.y_pos >= 350:
                 self.en_agua = True
         
-        # Limitar profundidad máxima
-        if self.y_pos > SCREEN_HEIGHT - 50:
-            self.y_pos = SCREEN_HEIGHT - 50
-            self.vy = 0
-            self.vx = 0
-            self.llegado = True
-
+        # WEIGHT: Profundidad máxima aumenta 15% por nivel
+        profundidad_extra = weight_level * 0.15
+        profundidad_max = SCREEN_HEIGHT - 50 + (profundidad_extra * 100)
+        profundidad_max = min(profundidad_max, SCREEN_HEIGHT - 20)  # Límite absoluto
+        
+        # REBOUND: Rebote al tocar el fondo
+        if self.y_pos > profundidad_max:
+            self.y_pos = profundidad_max
+            
+            if rebound_level > 0 and self.rebound_count < rebound_level:
+                # Rebotar hacia arriba
+                rebound_strength = 0.05 * rebound_level  # 5% más rebote por nivel
+                self.vy = -abs(self.vy) * (0.3 + rebound_strength)
+                self.rebotando = True
+                self.rebound_count += 1
+            else:
+                self.vy = 0
+                self.vx = 0
+                self.llegado = True
+        
+        # Si está rebotando, aplicar gravedad
+        if self.rebotando:
+            self.y_pos += self.vy
+            self.vy += 0.2  # Gravedad reducida en agua
+            
+            # Dejar de rebotar cuando vuelva a bajar
+            if self.vy > 0:
+                self.rebotando = False
+        
         self.tiempo_linea += 1
 
     def dibujar(self, pantalla):
@@ -478,7 +503,7 @@ class Juego:
             ('strength', 'STRENGTH', '🔧', (180, 80, 80), 'Hook flies 5% further'),
             ('weight', 'WEIGHT', '⚓', (80, 160, 180), 'Hook sinks 15% deeper'),
             ('rebound', 'REBOUND', '↺', (80, 180, 80), 'Hook bounces 5% better'),
-            ('resistance', 'RESISTANCE', '🛡', (200, 140, 80), 'Hook up to 1 more fishes'),
+            ('resistance', 'RESISTANCE', '🛡', (200, 140, 80), 'Catch 1 more fish'),
         ]
         
         for idx, (key, name, icon, color, desc) in enumerate(mejoras):
@@ -545,7 +570,9 @@ class Juego:
                 self.anuncio_tiempo = 0
 
         if self.linea:
-            self.linea.actualizar()
+            weight_level = self.upgrades.get('weight', 0)
+            rebound_level = self.upgrades.get('rebound', 0)
+            self.linea.actualizar(weight_level, rebound_level)
             # Actualizar profundidad
             profundidad_px = self.linea.y_pos - 350
             self.profundidad_actual = max(0, profundidad_px / (SCREEN_HEIGHT - 350) * 200)
@@ -597,36 +624,49 @@ class Juego:
 
         if self.estado == EstadoJuego.LANZADO:
             self.linea.pez_enganchado = None
+            self.linea.peces_enganchados = []
+            
+            # RESISTANCE: Permite pescar múltiples peces
+            max_peces = 1 + self.upgrades.get('resistance', 0)
 
             for pez in self.peces:
-                if pez.vivo:
+                if pez.vivo and len(self.linea.peces_enganchados) < max_peces:
                     distancia = math.hypot(pez.x - self.linea.x_pos,
                                          pez.y - self.linea.y_pos)
                     extra_hook = 5 + self.upgrades.get('weight', 0) * 3
                     if distancia < pez.radio + extra_hook:
-                        self.linea.pez_enganchado = pez
-                        self.estado = EstadoJuego.PESCANDO
-                        break
+                        self.linea.peces_enganchados.append(pez)
+                        if not self.linea.pez_enganchado:
+                            self.linea.pez_enganchado = pez
+            
+            if len(self.linea.peces_enganchados) > 0:
+                self.estado = EstadoJuego.PESCANDO
 
         if self.estado == EstadoJuego.PESCANDO:
             if not self.mouse_presionado:
-                pez = None
-                if self.linea:
-                    pez = self.linea.pez_enganchado
-                if pez:
-                    pez.vivo = False
-                    self.pescados += 1
-                    self.peces_session.append(pez)
-                    self.monedas += self.moneda_por_pez
-                    self.mensaje = f"+{self.moneda_por_pez} monedas! Pescados: {self.pescados}"
-                    self.tiempo_mensaje = 120
+                if self.linea and len(self.linea.peces_enganchados) > 0:
+                    peces_capturados = len(self.linea.peces_enganchados)
+                    monedas_ganadas = peces_capturados * self.moneda_por_pez
                     
-                    # Partículas
-                    for _ in range(5):
-                        self.agregar_particula(pez.x, pez.y, 'chispa')
-
-                    self.peces.append(Pez(random.randint(150, SCREEN_WIDTH - 150),
-                                         random.randint(420, SCREEN_HEIGHT - 80)))
+                    for pez in self.linea.peces_enganchados:
+                        pez.vivo = False
+                        self.pescados += 1
+                        self.peces_session.append(pez)
+                        
+                        # Partículas
+                        for _ in range(5):
+                            self.agregar_particula(pez.x, pez.y, 'chispa')
+                        
+                        # Agregar nuevo pez
+                        self.peces.append(Pez(random.randint(150, SCREEN_WIDTH - 150),
+                                             random.randint(420, SCREEN_HEIGHT - 80)))
+                    
+                    self.monedas += monedas_ganadas
+                    if peces_capturados > 1:
+                        self.mensaje = f"+{monedas_ganadas} monedas! {peces_capturados} peces! Total: {self.pescados}"
+                    else:
+                        self.mensaje = f"+{monedas_ganadas} monedas! Pescados: {self.pescados}"
+                    self.tiempo_mensaje = 120
 
                 self.estado = EstadoJuego.ESPERANDO
                 self.bote.flexion_cana = 0
