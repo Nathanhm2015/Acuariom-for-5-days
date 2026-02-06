@@ -127,44 +127,57 @@ class Linea:
         self.x_pos = x_inicio
         self.y_pos = y_inicio
 
-        # Velocidad inicial basada en potencia
-        max_speed = 40.0
-        speed = (potencia / 100) * max_speed
-        self.vx = math.cos(angulo) * speed
-        self.vy = math.sin(angulo) * speed
+        # Calcular punto objetivo basado en ángulo y distancia
+        self.target_x = x_inicio + math.cos(angulo) * self.distancia_max
+        self.target_y = y_inicio + math.sin(angulo) * self.distancia_max
+        
+        # Velocidad constante hacia el objetivo
+        self.speed = 8.0  # Velocidad fija
+        dx = self.target_x - self.x_pos
+        dy = self.target_y - self.y_pos
+        dist = math.sqrt(dx*dx + dy*dy)
+        if dist > 0:
+            self.vx = (dx / dist) * self.speed
+            self.vy = (dy / dist) * self.speed
+        else:
+            self.vx = 0
+            self.vy = 0
 
-        # Gravedad
-        self.gravity = 0.9
         self.en_agua = False
         self.pez_enganchado = None
         self.tiempo_linea = 0
+        self.llegado = False
 
     def actualizar(self):
-        # Física tipo proyectil
-        if not self.en_agua:
-            self.x_pos += self.vx
-            self.y_pos += self.vy
-            self.vy += self.gravity
-
-            # Si alcanza la superficie del agua, entra pero sigue moviéndose
+        # Movimiento directo hacia el objetivo
+        if not self.llegado:
+            # Calcular distancia al objetivo
+            dx = self.target_x - self.x_pos
+            dy = self.target_y - self.y_pos
+            dist_to_target = math.sqrt(dx*dx + dy*dy)
+            
+            # Si estamos cerca del objetivo, detenerse
+            if dist_to_target < self.speed:
+                self.x_pos = self.target_x
+                self.y_pos = self.target_y
+                self.vx = 0
+                self.vy = 0
+                self.llegado = True
+            else:
+                # Moverse hacia el objetivo
+                self.x_pos += self.vx
+                self.y_pos += self.vy
+            
+            # Detectar si entra al agua
             if self.y_pos >= 350:
                 self.en_agua = True
-                # Reducir velocidad al entrar al agua pero mantener dirección
-                self.vx *= 0.6
-                self.vy = abs(self.vy) * 0.3  # Hundir lentamente
-        else:
-            # En el agua: continuar moviéndose horizontalmente y hundiéndose
-            self.x_pos += self.vx
-            self.y_pos += self.vy
-            
-            # Fricción del agua
-            self.vx *= 0.95
-            self.vy += 0.3  # Gravedad en el agua (más lento)
-            
-            # Limitar profundidad máxima
-            if self.y_pos > SCREEN_HEIGHT - 50:
-                self.y_pos = SCREEN_HEIGHT - 50
-                self.vy = 0
+        
+        # Limitar profundidad máxima
+        if self.y_pos > SCREEN_HEIGHT - 50:
+            self.y_pos = SCREEN_HEIGHT - 50
+            self.vy = 0
+            self.vx = 0
+            self.llegado = True
 
         self.tiempo_linea += 1
 
@@ -210,60 +223,116 @@ class Bote:
         self.flexion_cana = 0
         self.tiempo_lanzamiento = 0
         self.animando_lanzamiento = False
+        
+        # Intentar cargar imagen del pescador
+        try:
+            self.imagen_pescador = pygame.image.load('pescador.png').convert_alpha()
+            # Escalar la imagen a un tamaño apropiado
+            self.imagen_pescador = pygame.transform.scale(self.imagen_pescador, (200, 150))
+            self.usar_imagen = True
+        except:
+            self.imagen_pescador = None
+            self.usar_imagen = False
 
     def dibujar(self, pantalla):
-        # Bote simple en estilo flat
-        # Casco
-        casco_color = (200, 140, 80)
-        casco_puntos = [
-            (int(self.x - self.ancho // 2), int(self.y)),
-            (int(self.x - self.ancho // 2 + 10), int(self.y - self.alto // 3)),
-            (int(self.x - self.ancho // 4), int(self.y - self.alto)),
-            (int(self.x + self.ancho // 4), int(self.y - self.alto)),
-            (int(self.x + self.ancho // 2 - 10), int(self.y - self.alto // 3)),
-            (int(self.x + self.ancho // 2), int(self.y)),
-        ]
+        # Si hay imagen cargada, usarla
+        if self.usar_imagen and self.imagen_pescador:
+            # Posicionar la imagen centrada en la posición del bote
+            img_rect = self.imagen_pescador.get_rect()
+            img_rect.centerx = int(self.x)
+            img_rect.bottom = int(self.y)
+            pantalla.blit(self.imagen_pescador, img_rect)
+            
+            # Punto de agarre de la caña (ajustar según la imagen)
+            punto_agarre_x = self.x + 20
+            punto_agarre_y = self.y - 60
+        else:
+            # Dibujar bote y pescador manualmente
+            # Bote estilo imagen de referencia (más redondeado)
+            # Casco inferior (marrón oscuro)
+            casco_inferior = [
+                (int(self.x - self.ancho // 2), int(self.y)),
+                (int(self.x - self.ancho // 2 + 8), int(self.y - self.alto // 4)),
+                (int(self.x - self.ancho // 3), int(self.y - self.alto // 2)),
+                (int(self.x + self.ancho // 3), int(self.y - self.alto // 2)),
+                (int(self.x + self.ancho // 2 - 8), int(self.y - self.alto // 4)),
+                (int(self.x + self.ancho // 2), int(self.y)),
+            ]
+            pygame.draw.polygon(pantalla, (120, 80, 60), casco_inferior)
+            pygame.draw.polygon(pantalla, NEGRO, casco_inferior, 3)
 
-        pygame.draw.polygon(pantalla, casco_color, casco_puntos)
-        pygame.draw.polygon(pantalla, NEGRO, casco_puntos, 2)
+            # Casco superior (marrón medio)
+            casco_superior = [
+                (int(self.x - self.ancho // 2 + 8), int(self.y - self.alto // 4)),
+                (int(self.x - self.ancho // 3), int(self.y - self.alto // 2)),
+                (int(self.x - self.ancho // 4), int(self.y - self.alto + 5)),
+                (int(self.x + self.ancho // 4), int(self.y - self.alto + 5)),
+                (int(self.x + self.ancho // 3), int(self.y - self.alto // 2)),
+                (int(self.x + self.ancho // 2 - 8), int(self.y - self.alto // 4)),
+            ]
+            pygame.draw.polygon(pantalla, (160, 110, 75), casco_superior)
+            pygame.draw.polygon(pantalla, NEGRO, casco_superior, 2)
 
-        # Banda decorativa naranja en el bote
-        banda_rect = (int(self.x - self.ancho // 2 + 10), int(self.y - self.alto // 2 - 4), int(self.ancho - 20), 10)
-        pygame.draw.rect(pantalla, (255, 140, 0), banda_rect, border_radius=5)
+            # Banda decorativa naranja brillante en el medio
+            banda_y = int(self.y - self.alto // 2 + 5)
+            banda_rect = pygame.Rect(int(self.x - self.ancho // 2 + 15), banda_y, int(self.ancho - 30), 12)
+            pygame.draw.rect(pantalla, (255, 160, 60), banda_rect, border_radius=6)
+            pygame.draw.rect(pantalla, (230, 140, 50), banda_rect, 2, border_radius=6)
 
-        # Personaje pescador (caricaturesco)
-        jugador_x = self.x - 20
-        jugador_y = self.y - self.alto + 30
+            # Personaje pescador (estilo imagen de referencia)
+            jugador_x = self.x - 20
+            jugador_y = self.y - self.alto + 30
 
-        # Cabeza
-        pygame.draw.circle(pantalla, (255, 200, 160), (int(jugador_x), int(jugador_y - 18)), 10)
+            # Piernas (azul oscuro) - dibujadas primero
+            pygame.draw.rect(pantalla, (50, 70, 90), (int(jugador_x - 9), int(jugador_y + 8), 7, 20), border_radius=2)
+            pygame.draw.rect(pantalla, (50, 70, 90), (int(jugador_x + 2), int(jugador_y + 8), 7, 20), border_radius=2)
+            
+            # Botas verdes
+            pygame.draw.ellipse(pantalla, (70, 100, 70), (int(jugador_x - 10), int(jugador_y + 26), 8, 5))
+            pygame.draw.ellipse(pantalla, (70, 100, 70), (int(jugador_x + 2), int(jugador_y + 26), 8, 5))
 
-        # Barba grande
-        pygame.draw.ellipse(pantalla, (120, 80, 40), (int(jugador_x - 8), int(jugador_y - 6), 16, 12))
+            # Torso (suéter verde oliva)
+            pygame.draw.ellipse(pantalla, (110, 130, 90), (int(jugador_x - 12), int(jugador_y - 4), 24, 22))
+            
+            # Cuello del suéter
+            pygame.draw.rect(pantalla, (90, 110, 70), (int(jugador_x - 5), int(jugador_y - 10), 10, 6))
 
-        # Gorro
-        gorro_puntos = [(int(jugador_x - 12), int(jugador_y - 20)),
-                        (int(jugador_x), int(jugador_y - 28)),
-                        (int(jugador_x + 12), int(jugador_y - 20))]
-        pygame.draw.polygon(pantalla, (220, 100, 100), gorro_puntos)
+            # Cabeza (piel)
+            pygame.draw.circle(pantalla, (240, 200, 170), (int(jugador_x), int(jugador_y - 18)), 11)
 
-        # Ojos simples
-        pygame.draw.circle(pantalla, NEGRO, (int(jugador_x - 3), int(jugador_y - 20)), 2)
-        pygame.draw.circle(pantalla, NEGRO, (int(jugador_x + 3), int(jugador_y - 20)), 2)
+            # Barba grande y prominente (marrón oscuro)
+            pygame.draw.ellipse(pantalla, (100, 60, 30), (int(jugador_x - 10), int(jugador_y - 12), 20, 16))
+            # Detalle de barba en capas
+            pygame.draw.ellipse(pantalla, (110, 70, 35), (int(jugador_x - 8), int(jugador_y - 10), 16, 13))
 
-        # Torso
-        pygame.draw.rect(pantalla, (80, 140, 100), (int(jugador_x - 10), int(jugador_y - 2), 20, 18))
+            # Nariz
+            pygame.draw.circle(pantalla, (220, 170, 150), (int(jugador_x), int(jugador_y - 15)), 3)
 
-        # Piernas
-        pygame.draw.line(pantalla, (40, 80, 120), (int(jugador_x - 4), int(jugador_y + 16)),
-                        (int(jugador_x - 4), int(jugador_y + 28)), 4)
-        pygame.draw.line(pantalla, (40, 80, 120), (int(jugador_x + 4), int(jugador_y + 16)),
-                        (int(jugador_x + 4), int(jugador_y + 28)), 4)
+            # Ojos simples
+            pygame.draw.circle(pantalla, NEGRO, (int(jugador_x - 4), int(jugador_y - 20)), 2)
+            pygame.draw.circle(pantalla, NEGRO, (int(jugador_x + 2), int(jugador_y - 20)), 2)
+            
+            # Cejas
+            pygame.draw.line(pantalla, (80, 50, 25), (int(jugador_x - 6), int(jugador_y - 22)), 
+                            (int(jugador_x - 2), int(jugador_y - 23)), 2)
+            pygame.draw.line(pantalla, (80, 50, 25), (int(jugador_x + 1), int(jugador_y - 23)), 
+                            (int(jugador_x + 4), int(jugador_y - 22)), 2)
+
+            # Sombrero amarillo/naranja estilo pescador
+            # Copa del sombrero
+            pygame.draw.ellipse(pantalla, (240, 180, 80), (int(jugador_x - 10), int(jugador_y - 35), 20, 12))
+            # Parte superior redondeada
+            pygame.draw.ellipse(pantalla, (245, 190, 90), (int(jugador_x - 8), int(jugador_y - 38), 16, 10))
+            # Ala del sombrero
+            pygame.draw.ellipse(pantalla, (235, 175, 75), (int(jugador_x - 16), int(jugador_y - 28), 32, 8))
+            # Sombra del ala
+            pygame.draw.arc(pantalla, (200, 150, 60), (int(jugador_x - 16), int(jugador_y - 28), 32, 8), 0, 3.14, 2)
+            
+            # Punto de agarre para la caña (posición manual)
+            punto_agarre_x = jugador_x + 8
+            punto_agarre_y = jugador_y + 2
 
         # Caña de pescar simple
-        punto_agarre_x = jugador_x + 8
-        punto_agarre_y = jugador_y + 2
-
         cana_largo = 95
         # Si el bote tiene referencia al juego y hay una línea lanzada, apuntar la caña al anzuelo
         ang_actual = self.angulo_cana
@@ -1172,6 +1241,12 @@ class Juego:
                 self.mouse_presionado = False
 
                 if self.estado == EstadoJuego.CARGANDO:
+                    # Capturar ángulo final basado en posición actual del mouse
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+                    dx = mouse_x - self.bote.x
+                    dy = mouse_y - (self.bote.y - 70)
+                    self.angulo_lanzamiento = math.atan2(dy, dx)
+                    
                     distancia_base = self.base_distance + self.upgrades.get('strength', 0) * 100
                     self.linea = Linea(self.bote.x, self.bote.y - 70, self.potencia,
                                       self.angulo_lanzamiento, distancia_base)
