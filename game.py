@@ -1,6 +1,7 @@
 import pygame
 import math
 import random
+import sys
 from enum import Enum
 
 # Inicializar Pygame
@@ -441,10 +442,10 @@ class Juego:
                 self.tiempo_mensaje = 120
                 return True
         else:
-            # Compra x3 "viendo anuncio" (simulado - gratis)
-            self.upgrades[key] += 3
-            self.mensaje = f"¡Mejora x3! Ahora nivel {self.upgrades[key]}"
-            self.tiempo_mensaje = 120
+            # Compra x3 "viendo anuncio" - iniciar pantalla de anuncio
+            self.estado = EstadoJuego.VIENDO_ANUNCIO
+            self.anuncio_tiempo = 0
+            self.anuncio_mejora_pendiente = key
             return True
         return False
 
@@ -460,6 +461,19 @@ class Juego:
             p['tiempo'] += 1
             if p['tiempo'] > p['duracion']:
                 self.particulas.remove(p)
+        
+        # Actualizar anuncio
+        if self.estado == EstadoJuego.VIENDO_ANUNCIO:
+            self.anuncio_tiempo += 1
+            if self.anuncio_tiempo >= self.anuncio_duracion:
+                # Anuncio terminado, otorgar mejora x3
+                if self.anuncio_mejora_pendiente:
+                    self.upgrades[self.anuncio_mejora_pendiente] += 3
+                    self.mensaje = f"¡Mejora x3! Ahora nivel {self.upgrades[self.anuncio_mejora_pendiente]}"
+                    self.tiempo_mensaje = 120
+                    self.anuncio_mejora_pendiente = None
+                self.estado = EstadoJuego.ESPERANDO
+                self.anuncio_tiempo = 0
 
         if self.linea:
             self.linea.actualizar()
@@ -555,6 +569,10 @@ class Juego:
     def dibujar(self):
         if self.estado == EstadoJuego.RECOMPENSAS:
             self.dibujar_pantalla_recompensas()
+            return
+        
+        if self.estado == EstadoJuego.VIENDO_ANUNCIO:
+            self.dibujar_anuncio()
             return
         
         # Fondo - Cielo degradado (amarillo)
@@ -990,6 +1008,64 @@ class Juego:
             upgrade_label = pygame.font.Font(None, 16).render("Upgrade", True, BLANCO)
             self.pantalla.blit(upgrade_label, (x3_rect.x + 4, x3_rect.y + 42))
     
+    def dibujar_anuncio(self):
+        """Dibujar pantalla de anuncio simulado"""
+        # Fondo oscuro
+        self.pantalla.fill((30, 30, 30))
+        
+        # Panel central del anuncio
+        anuncio_w = 600
+        anuncio_h = 400
+        anuncio_x = (SCREEN_WIDTH - anuncio_w) // 2
+        anuncio_y = (SCREEN_HEIGHT - anuncio_h) // 2
+        
+        pygame.draw.rect(self.pantalla, (50, 50, 50), (anuncio_x, anuncio_y, anuncio_w, anuncio_h), border_radius=15)
+        pygame.draw.rect(self.pantalla, (100, 200, 255), (anuncio_x, anuncio_y, anuncio_w, anuncio_h), 4, border_radius=15)
+        
+        # Título del anuncio
+        titulo_anuncio = self.fuente_titulo.render("📺 Anuncio", True, (255, 200, 100))
+        self.pantalla.blit(titulo_anuncio, (SCREEN_WIDTH // 2 - 100, anuncio_y + 30))
+        
+        # Simulación de anuncio - mostrar contenido "genérico"
+        contenido_y = anuncio_y + 100
+        
+        # Logo/ícono fake del anuncio
+        logo_size = 120
+        logo_x = SCREEN_WIDTH // 2 - logo_size // 2
+        pygame.draw.rect(self.pantalla, (80, 80, 200), (logo_x, contenido_y, logo_size, logo_size), border_radius=10)
+        
+        # Texto del anuncio simulado
+        texto_fake = self.fuente.render("¡Increíble Oferta!", True, (255, 255, 255))
+        self.pantalla.blit(texto_fake, (SCREEN_WIDTH // 2 - 100, contenido_y + 140))
+        
+        desc_fake = self.fuente_pequeña.render("Producto genérico del anuncio...", True, (180, 180, 180))
+        self.pantalla.blit(desc_fake, (SCREEN_WIDTH // 2 - 120, contenido_y + 170))
+        
+        # Contador regresivo
+        tiempo_restante = (self.anuncio_duracion - self.anuncio_tiempo) / 60.0  # Convertir a segundos
+        if tiempo_restante > 0:
+            contador = self.fuente_grande.render(f"{int(tiempo_restante + 1)}", True, (255, 200, 0))
+            self.pantalla.blit(contador, (SCREEN_WIDTH // 2 - 20, anuncio_y + anuncio_h - 100))
+            
+            texto_espera = self.fuente_pequeña.render("Espera para recibir tu mejora x3...", True, (200, 200, 200))
+            self.pantalla.blit(texto_espera, (SCREEN_WIDTH // 2 - 140, anuncio_y + anuncio_h - 50))
+        else:
+            # Anuncio terminado - mostrar mensaje de cierre
+            texto_listo = self.fuente.render("¡Listo! Cerrando...", True, (100, 255, 100))
+            self.pantalla.blit(texto_listo, (SCREEN_WIDTH // 2 - 100, anuncio_y + anuncio_h - 80))
+        
+        # Barra de progreso del anuncio
+        barra_w = 400
+        barra_h = 20
+        barra_x = (SCREEN_WIDTH - barra_w) // 2
+        barra_y = anuncio_y + anuncio_h - 120
+        
+        pygame.draw.rect(self.pantalla, (60, 60, 60), (barra_x, barra_y, barra_w, barra_h), border_radius=10)
+        
+        progreso = self.anuncio_tiempo / self.anuncio_duracion
+        progreso_w = int(barra_w * progreso)
+        pygame.draw.rect(self.pantalla, (100, 200, 100), (barra_x, barra_y, progreso_w, barra_h), border_radius=10)
+    
     def dibujar_pantalla_recompensas(self):
         # Pantalla de recompensas con jackpot
         self.pantalla.fill((20, 20, 40))
@@ -1125,6 +1201,7 @@ class Juego:
             self.reloj.tick(FPS)
 
         pygame.quit()
+        sys.exit()
 
 if __name__ == "__main__":
     juego = Juego()
