@@ -35,6 +35,7 @@ class EstadoJuego(Enum):
     LANZADO = 3
     PESCANDO = 4
     RECOMPENSAS = 5
+    VIENDO_ANUNCIO = 6
 
 class Pez:
     def __init__(self, x, y):
@@ -144,13 +145,25 @@ class Linea:
             self.y_pos += self.vy
             self.vy += self.gravity
 
-            # Distancia recorrida
-            distancia_recorrida = math.hypot(self.x_pos - self.x_inicio, self.y_pos - self.y_inicio)
-
-            # Si alcanza la distancia máxima, cae al agua
-            if distancia_recorrida >= self.distancia_max or self.y_pos >= 350:
-                self.y_pos = min(self.y_pos, 350)
+            # Si alcanza la superficie del agua, entra pero sigue moviéndose
+            if self.y_pos >= 350:
                 self.en_agua = True
+                # Reducir velocidad al entrar al agua pero mantener dirección
+                self.vx *= 0.6
+                self.vy = abs(self.vy) * 0.3  # Hundir lentamente
+        else:
+            # En el agua: continuar moviéndose horizontalmente y hundiéndose
+            self.x_pos += self.vx
+            self.y_pos += self.vy
+            
+            # Fricción del agua
+            self.vx *= 0.95
+            self.vy += 0.3  # Gravedad en el agua (más lento)
+            
+            # Limitar profundidad máxima
+            if self.y_pos > SCREEN_HEIGHT - 50:
+                self.y_pos = SCREEN_HEIGHT - 50
+                self.vy = 0
 
         self.tiempo_linea += 1
 
@@ -254,10 +267,13 @@ class Bote:
         # Si el bote tiene referencia al juego y hay una línea lanzada, apuntar la caña al anzuelo
         ang_actual = self.angulo_cana
         try:
-            if hasattr(self, 'game_ref') and self.game_ref and self.game_ref.linea:
+            # Sólo apuntar al anzuelo cuando la línea está lanzada o pescando
+            if hasattr(self, 'game_ref') and self.game_ref and self.game_ref.linea and self.game_ref.estado in (EstadoJuego.LANZADO, EstadoJuego.PESCANDO):
                 lx = self.game_ref.linea.x_pos
                 ly = self.game_ref.linea.y_pos
                 ang_actual = math.atan2(ly - punto_agarre_y, lx - punto_agarre_x)
+            else:
+                ang_actual = self.angulo_cana
         except Exception:
             ang_actual = self.angulo_cana
 
@@ -340,6 +356,10 @@ class Juego:
         }
         self.base_distance = 400
         
+        # Botones de mejora (se crean al inicio)
+        self.upgrade_buttons = []
+        self.crear_botones_mejoras()
+        
         # Profundidad actual del anzuelo
         self.profundidad_actual = 0
         
@@ -371,6 +391,57 @@ class Juego:
             {'rect': pygame.Rect(SCREEN_WIDTH//2 - 150, SCREEN_HEIGHT - 120, 140, 50), 'label': 'Collect', 'multiplicador': 1},
             {'rect': pygame.Rect(SCREEN_WIDTH//2 + 20, SCREEN_HEIGHT - 120, 140, 50), 'label': 'Collect x3', 'multiplicador': 3}
         ]
+    
+    def crear_botones_mejoras(self):
+        """Crear botones de mejora con sus posiciones"""
+        self.upgrade_buttons = []
+        tienda_x = 15
+        tienda_y = 120
+        item_h = 65
+        
+        mejoras = [
+            ('strength', 'STRENGTH', '🔧', (180, 80, 80), 'Fisherman is 25% stronger'),
+            ('weight', 'WEIGHT', '⚓', (80, 160, 180), 'Hook sinks 15% deeper'),
+            ('rebound', 'REBOUND', '↺', (80, 180, 80), 'Hook bounces 5% better'),
+            ('resistance', 'RESISTANCE', '🛡', (200, 140, 80), 'Hook up to 1 more fishes'),
+        ]
+        
+        for idx, (key, name, icon, color, desc) in enumerate(mejoras):
+            y_pos = tienda_y + idx * item_h
+            btn_rect = pygame.Rect(tienda_x, y_pos, 280, 55)
+            btn_x3_rect = pygame.Rect(tienda_x + 290, y_pos, 65, 55)
+            
+            self.upgrade_buttons.append({
+                'key': key,
+                'name': name,
+                'icon': icon,
+                'color': color,
+                'desc': desc,
+                'rect': btn_rect,
+                'x3_rect': btn_x3_rect
+            })
+    
+    def comprar_mejora(self, key, multiplicador=1):
+        """Comprar una mejora (multiplicador 1 normal, 3 con anuncio)"""
+        costo_base = self.upgrade_costs[key]
+        costo_total = costo_base * multiplicador
+        
+        if multiplicador == 1:
+            # Compra normal con monedas
+            if self.monedas >= costo_total:
+                self.monedas -= costo_total
+                self.upgrades[key] += 1
+                self.upgrade_costs[key] = int(costo_base * 1.5)  # Incrementar costo
+                self.mensaje = f"¡Mejora comprada! {self.upgrades[key]}"
+                self.tiempo_mensaje = 120
+                return True
+        else:
+            # Compra x3 "viendo anuncio" (simulado - gratis)
+            self.upgrades[key] += 3
+            self.mensaje = f"¡Mejora x3! Ahora nivel {self.upgrades[key]}"
+            self.tiempo_mensaje = 120
+            return True
+        return False
 
     def actualizar(self):
         self.bote.actualizar_lanzamiento()
@@ -416,6 +487,16 @@ class Juego:
                         self.linea = None
                         self.estado = EstadoJuego.ESPERANDO
                         self.bote.flexion_cana = 0
+
+        # Si no hay línea, suavemente volver el ángulo de la caña a reposo
+        if not self.linea:
+            diff = self.angulo_cana_reposo - self.bote.angulo_cana
+            # normalizar ángulo entre -pi..pi for smooth interpolation
+            while diff > math.pi:
+                diff -= 2 * math.pi
+            while diff < -math.pi:
+                diff += 2 * math.pi
+            self.bote.angulo_cana += diff * 0.15
 
         if self.estado == EstadoJuego.CARGANDO:
             self.potencia = min(100, self.potencia + self.incremento_potencia)
@@ -693,28 +774,80 @@ class Juego:
                 zona_texto = self.fuente_pequeña.render("Too much!", True, (255, 0, 0))
             self.pantalla.blit(zona_texto, (medidor_x + medidor_ancho + 10, medidor_y + 30))
 
-            # Arco visual de lanzamiento (fan) alrededor de la caña
+            # MEDIDOR DE ARCO VISUAL - como en la imagen de referencia
             try:
-                center_x = int(self.bote.x + 8)
-                center_y = int(self.bote.y - self.bote.alto + 30 + 2)
-                radius = 120
-                ang = self.angulo_lanzamiento
-                span = 1.2
-                # tres zonas: buena (verde), media (amarillo), mala (rojo)
-                zones = [(-span/2, -span/6, (0,200,100,90)), (-span/6, span/6, (255,200,0,90)), (span/6, span/2, (255,0,0,90))]
-                for a0, a1, col in zones:
-                    pts = [(center_x, center_y)]
-                    steps = 18
-                    for i in range(steps+1):
-                        t = a0 + (a1 - a0) * (i/steps)
-                        a = ang + t
-                        x = center_x + math.cos(a) * radius
-                        y = center_y + math.sin(a) * radius
-                        pts.append((int(x), int(y)))
-                    s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-                    pygame.draw.polygon(s, col, pts)
-                    self.pantalla.blit(s, (0,0))
-            except Exception:
+                # Centro del arco (cerca de la punta de la caña)
+                center_x = int(self.bote.x + 50)
+                center_y = int(self.bote.y - 80)
+                radius_outer = 200
+                radius_inner = 140
+                
+                # Superficie transparente para dibujar el arco
+                arc_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+                
+                # Ángulo base (apuntando hacia donde el jugador señaló)
+                base_angle = self.angulo_lanzamiento
+                arc_span = 1.0  # Amplitud total del arco en radianes
+                
+                # Dibujar las 3 zonas del arco: ROJO (izq), AMARILLO, VERDE (centro), AMARILLO, ROJO (der)
+                zones = [
+                    # (ángulo_inicio_offset, ángulo_fin_offset, color, label)
+                    (-arc_span/2, -arc_span/3, (255, 80, 80, 180), ""),  # Rojo izquierda
+                    (-arc_span/3, -arc_span/6, (255, 200, 0, 180), ""),  # Amarillo izquierda
+                    (-arc_span/6, arc_span/6, (50, 255, 50, 180), "PERFECT"),  # Verde centro
+                    (arc_span/6, arc_span/3, (255, 200, 0, 180), ""),  # Amarillo derecha
+                    (arc_span/3, arc_span/2, (255, 80, 80, 180), "")   # Rojo derecha
+                ]
+                
+                for a_start, a_end, color, label in zones:
+                    # Dibujar segmento del arco
+                    points = [(center_x, center_y)]
+                    steps = 20
+                    
+                    # Arco exterior
+                    for i in range(steps + 1):
+                        t = i / steps
+                        angle = base_angle + a_start + (a_end - a_start) * t
+                        x = center_x + math.cos(angle) * radius_outer
+                        y = center_y + math.sin(angle) * radius_outer
+                        points.append((int(x), int(y)))
+                    
+                    # Arco interior (de vuelta)
+                    for i in range(steps, -1, -1):
+                        t = i / steps
+                        angle = base_angle + a_start + (a_end - a_start) * t
+                        x = center_x + math.cos(angle) * radius_inner
+                        y = center_y + math.sin(angle) * radius_inner
+                        points.append((int(x), int(y)))
+                    
+                    pygame.draw.polygon(arc_surf, color, points)
+                    # Contorno
+                    pygame.draw.polygon(arc_surf, (0, 0, 0, 100), points, 2)
+                
+                self.pantalla.blit(arc_surf, (0, 0))
+                
+                # Dibujar indicador de potencia actual (aguja/flecha)
+                # La potencia mapea a una posición en el arco
+                # 0% = extremo izquierdo, 50% = centro, 100% = extremo derecho
+                potencia_normalizada = self.potencia / 100.0
+                indicator_angle = base_angle + (-arc_span/2) + (arc_span * potencia_normalizada)
+                
+                # Aguja/indicador
+                indicator_length = radius_outer + 20
+                ind_x = center_x + math.cos(indicator_angle) * indicator_length
+                ind_y = center_y + math.sin(indicator_angle) * indicator_length
+                
+                # Dibujar línea indicadora gruesa
+                pygame.draw.line(self.pantalla, (255, 255, 255), 
+                               (center_x, center_y), (int(ind_x), int(ind_y)), 6)
+                pygame.draw.line(self.pantalla, (0, 0, 0), 
+                               (center_x, center_y), (int(ind_x), int(ind_y)), 4)
+                
+                # Círculo en el centro
+                pygame.draw.circle(self.pantalla, (255, 255, 255), (center_x, center_y), 8)
+                pygame.draw.circle(self.pantalla, (0, 0, 0), (center_x, center_y), 6)
+                
+            except Exception as e:
                 pass
         else:
             if self.estado == EstadoJuego.ESPERANDO:
@@ -772,46 +905,85 @@ class Juego:
             self.pantalla.blit(instruccion, (SCREEN_WIDTH // 2 - 120, SCREEN_HEIGHT // 2 + 20))
     
     def dibujar_tienda(self):
-        # Panel de tienda a la izquierda
+        """Dibujar panel de tienda con botones de mejoras clicables"""
+        # Fondo de la tienda
         tienda_x = 10
-        tienda_y = 110
-        tienda_w = 120
-        tienda_h = SCREEN_HEIGHT - 130
+        tienda_y = 100
+        tienda_w = 370
+        tienda_h = 330
         
-        # Fondo
-        tienda_surf = pygame.Surface((tienda_w, tienda_h))
-        tienda_surf.set_alpha(200)
-        tienda_surf.fill((40, 30, 50))
-        self.pantalla.blit(tienda_surf, (tienda_x, tienda_y))
-        pygame.draw.rect(self.pantalla, (150, 100, 200), (tienda_x, tienda_y, tienda_w, tienda_h), 2)
+        # Panel principal con borde celeste
+        pygame.draw.rect(self.pantalla, (40, 40, 60), (tienda_x, tienda_y, tienda_w, tienda_h))
+        pygame.draw.rect(self.pantalla, (80, 200, 255), (tienda_x, tienda_y, tienda_w, tienda_h), 4)
         
-        # Título
-        titulo = self.fuente_pequeña.render("MEJORAS", True, (200, 150, 255))
-        self.pantalla.blit(titulo, (tienda_x + 10, tienda_y + 8))
+        # Monedas arriba
+        monedas_panel = pygame.Rect(tienda_x + 10, tienda_y - 50, 100, 40)
+        pygame.draw.rect(self.pantalla, (60, 60, 80), monedas_panel, border_radius=8)
+        pygame.draw.rect(self.pantalla, (100, 220, 255), monedas_panel, 3, border_radius=8)
         
-        # Mejoras disponibles
-        mejoras_info = [
-            ('Strength', 'Fuerza', 'strength'),
-            ('Weight', 'Peso', 'weight'),
-            ('Rebound', 'Rebote', 'rebound'),
-            ('Resistance', 'Resist.', 'resistance'),
-        ]
+        monedas_texto = self.fuente_pequeña.render(f"{self.monedas}", True, (255, 220, 100))
+        coin_icon = self.fuente_pequeña.render("💰", True, BLANCO)
+        self.pantalla.blit(coin_icon, (monedas_panel.x + 8, monedas_panel.y + 8))
+        self.pantalla.blit(monedas_texto, (monedas_panel.x + 40, monedas_panel.y + 10))
         
-        item_h = 35
-        for idx, (nombre_en, nombre_esp, key) in enumerate(mejoras_info):
-            y_pos = tienda_y + 40 + idx * item_h
+        # Dibujar cada botón de mejora
+        for btn in self.upgrade_buttons:
+            key = btn['key']
+            rect = btn['rect']
+            x3_rect = btn['x3_rect']
+            nivel = self.upgrades[key]
+            costo = self.upgrade_costs[key]
+            tiene_dinero = self.monedas >= costo
             
-            # Nivel actual
-            nivel = self.upgrades.get(key, 0)
-            costo = self.upgrade_costs.get(key, 0)
+            # Color del botón principal (gris si no tiene dinero, color normal si sí)
+            if tiene_dinero:
+                color_fondo = btn['color']
+                color_borde = (min(255, btn['color'][0] + 40), min(255, btn['color'][1] + 40), min(255, btn['color'][2] + 40))
+            else:
+                color_fondo = (100, 120, 130)  # Gris/celeste apagado
+                color_borde = (140, 160, 170)
             
-            # Nombre
-            texto_name = self.fuente_pequeña.render(nombre_esp, True, (255, 200, 100))
-            self.pantalla.blit(texto_name, (tienda_x + 10, y_pos))
+            # Botón principal
+            pygame.draw.rect(self.pantalla, color_fondo, rect, border_radius=8)
+            pygame.draw.rect(self.pantalla, color_borde, rect, 3, border_radius=8)
             
-            # Nivel y costo
-            texto_info = pygame.font.Font(None, 18).render(f"Lv{nivel} ${costo}", True, (100, 200, 50))
-            self.pantalla.blit(texto_info, (tienda_x + 10, y_pos + 16))
+            # Icono/emoji más pequeño
+            icono = self.fuente.render(btn['icon'], True, BLANCO)
+            self.pantalla.blit(icono, (rect.x + 8, rect.y + 10))
+            
+            # Nombre de la mejora
+            nombre_texto = self.fuente_pequeña.render(btn['name'], True, BLANCO)
+            self.pantalla.blit(nombre_texto, (rect.x + 55, rect.y + 8))
+            
+            # Costo con moneda
+            costo_texto = pygame.font.Font(None, 20).render(f"💰 {costo}", True, (255, 220, 100))
+            self.pantalla.blit(costo_texto, (rect.x + 200, rect.y + 8))
+            
+            # Descripción más pequeña
+            desc_font = pygame.font.Font(None, 18)
+            desc_texto = desc_font.render(btn['desc'], True, (200, 200, 200) if tiene_dinero else (140, 140, 140))
+            self.pantalla.blit(desc_texto, (rect.x + 55, rect.y + 32))
+            
+            # Botón x3 (con anuncio) más pequeño
+            if tiene_dinero:
+                x3_color = (100, 200, 100)  # Verde
+                x3_borde = (150, 255, 150)
+            else:
+                x3_color = (100, 120, 130)
+                x3_borde = (140, 160, 170)
+            
+            pygame.draw.rect(self.pantalla, x3_color, x3_rect, border_radius=8)
+            pygame.draw.rect(self.pantalla, x3_borde, x3_rect, 3, border_radius=8)
+            
+            # Icono de video/anuncio
+            video_icon = self.fuente_pequeña.render("📺", True, BLANCO)
+            self.pantalla.blit(video_icon, (x3_rect.x + 8, x3_rect.y + 5))
+            
+            x3_texto = pygame.font.Font(None, 20).render("x3", True, BLANCO)
+            self.pantalla.blit(x3_texto, (x3_rect.x + 20, x3_rect.y + 28))
+            
+            upgrade_label = pygame.font.Font(None, 16).render("Upgrade", True, BLANCO)
+            self.pantalla.blit(upgrade_label, (x3_rect.x + 4, x3_rect.y + 42))
     
     def dibujar_pantalla_recompensas(self):
         # Pantalla de recompensas con jackpot
@@ -886,6 +1058,17 @@ class Juego:
                             self.profundidad_actual = 0
                             self.peces_session = []
                     return True
+                
+                # Detectar clicks en botones de mejoras
+                for btn in self.upgrade_buttons:
+                    if btn['rect'].collidepoint(mx, my):
+                        # Click en botón principal (compra normal)
+                        self.comprar_mejora(btn['key'], multiplicador=1)
+                        return True
+                    elif btn['x3_rect'].collidepoint(mx, my):
+                        # Click en botón x3 (ver anuncio - gratis)
+                        self.comprar_mejora(btn['key'], multiplicador=3)
+                        return True
 
                 if self.estado == EstadoJuego.ESPERANDO:
                     self.estado = EstadoJuego.CARGANDO
