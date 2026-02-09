@@ -271,34 +271,44 @@ class Bote:
         self.animando_lanzamiento = False
         
         # Intentar cargar imagen del pescador
+        self.error_imagen = None
         try:
             # Cargar imagen
-            raw_image = pygame.image.load('pescador.png')
-            # Establecer color key para transparencia (blanco)
-            raw_image.set_colorkey((255, 255, 255))
-            self.imagen_pescador = raw_image.convert_alpha()
+            path_imagen = 'pescador.png'
+            raw_image = pygame.image.load(path_imagen)
+            
+            # Verificar si tiene canal alfa (transparencia) ya incluido
+            if raw_image.get_alpha() is None:
+                # Si no tiene transparencia, asumir fondo blanco y quitarlo
+                raw_image.set_colorkey((255, 255, 255))
+                self.imagen_pescador = raw_image.convert()
+            else:
+                self.imagen_pescador = raw_image.convert_alpha()
             
             # Escalar la imagen a un tamaño apropiado
-            self.imagen_pescador = pygame.transform.scale(self.imagen_pescador, (200, 150))
+            self.imagen_pescador = pygame.transform.scale(self.imagen_pescador, (230, 180))
             self.usar_imagen = True
-        except:
+            print("Imagen 'pescador.png' cargada correctamente.")
+        except Exception as e:
+            print(f"No se pudo cargar 'pescador.png': {e}")
             self.imagen_pescador = None
             self.usar_imagen = False
+            self.error_imagen = "Falta: pescador.png"
 
     def dibujar(self, pantalla):
         # Si hay imagen cargada, usarla
         if self.usar_imagen and self.imagen_pescador:
             # Posicionar la imagen centrada en la posición del bote
             img_rect = self.imagen_pescador.get_rect()
-            img_rect.centerx = int(self.x)
-            img_rect.bottom = int(self.y)
+            img_rect.centerx = int(self.x) + 10
+            img_rect.bottom = int(self.y) + 20
             pantalla.blit(self.imagen_pescador, img_rect)
             
-            # Punto de agarre de la caña (ajustar según la imagen)
-            punto_agarre_x = self.x + 20
-            punto_agarre_y = self.y - 60
+            # Punto de agarre de la caña estimado
+            punto_agarre_x = self.x + 40
+            punto_agarre_y = self.y - 45
         else:
-            # Dibujar bote y pescador manualmente
+            # Dibujar bote y pescador manualmente (FALLBACK)
             # Bote estilo imagen de referencia (más redondeado)
             # Casco inferior (marrón oscuro)
             casco_inferior = [
@@ -447,11 +457,15 @@ class Juego:
         self.angulo_cana_reposo = -math.pi / 2.5
 
         # Intentar cargar imagen de fondo
+        self.error_fondo = None
         try:
             self.imagen_fondo = pygame.image.load('fondo.png').convert()
             self.imagen_fondo = pygame.transform.scale(self.imagen_fondo, (SCREEN_WIDTH, SCREEN_HEIGHT))
-        except:
+            print("Imagen 'fondo.png' cargada correctamente.")
+        except Exception as e:
+            print(f"No se pudo cargar 'fondo.png': {e}")
             self.imagen_fondo = None
+            self.error_fondo = "Falta: fondo.png"
 
         self.bote = Bote(140, SCREEN_HEIGHT - 120)
         self.bote.angulo_cana = self.angulo_cana_reposo

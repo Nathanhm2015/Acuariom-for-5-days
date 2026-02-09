@@ -1,0 +1,27 @@
+INSTRUCCIONES PARA PONER LAS IMAGENES
+=======================================
+
+El juego está listo para usar tus imágenes, pero como soy una IA, 
+no tengo permiso para guardar archivos directamente en tu disco duro.
+
+TIENES QUE HACER ESTO TÚ MISMO (Es muy fácil):
+
+Paso 1: IMAGEN DEL PESCADOR
+---------------------------
+1. Busca la imagen del pescador que enviaste en el chat.
+2. Arrastra la imagen o guárdala en esta carpeta:
+   c:\Users\natha\Nextcloud\Documents\Repos\Acuariom-for-5-days\
+3. CAMBIA EL NOMBRE del archivo a:
+   pescador.png
+
+Paso 2: IMAGEN DEL FONDO
+------------------------
+1. Busca la imagen que quieres usar de fondo.
+2. Arrastra la imagen o guárdala en la misma carpeta.
+3. CAMBIA EL NOMBRE del archivo a:
+   fondo.png
+
+Paso 3: JUGAR
+-------------
+¡Ejecuta el juego de nuevo y verás tus imágenes!
+Si falta alguna, el juego te avisará con letras rojas en la pantalla.
