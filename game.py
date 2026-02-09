@@ -131,17 +131,16 @@ class Linea:
         self.target_x = x_inicio + math.cos(angulo) * self.distancia_max
         self.target_y = y_inicio + math.sin(angulo) * self.distancia_max
         
-        # Velocidad constante hacia el objetivo
-        self.speed = 8.0  # Velocidad fija
-        dx = self.target_x - self.x_pos
-        dy = self.target_y - self.y_pos
-        dist = math.sqrt(dx*dx + dy*dy)
-        if dist > 0:
-            self.vx = (dx / dist) * self.speed
-            self.vy = (dy / dist) * self.speed
-        else:
-            self.vx = 0
-            self.vy = 0
+        # SISTEMA HÍBRIDO: Vuela lejos horizontalmente, luego cae vertical
+        # Calcular velocidad inicial muy alta para ir MUY lejos
+        velocidad_base = 15.0 + (potencia / 100.0) * 10.0  # Entre 15 y 25
+        self.vx = math.cos(angulo) * velocidad_base
+        self.vy = math.sin(angulo) * velocidad_base
+        
+        # Física del vuelo
+        self.gravedad = 0.25  # Gravedad reducida para vuelo más largo
+        self.fase = 'volando'  # 'volando' o 'cayendo_vertical'
+        self.distancia_maxima_alcanzada = x_inicio + self.distancia_max * 0.85  # Punto donde empieza caída vertical
 
         self.en_agua = False
         self.pez_enganchado = None
@@ -150,30 +149,52 @@ class Linea:
         self.llegado = False
         self.rebotando = False
         self.rebound_count = 0
+        self.peces_generados = False  # Nueva bandera para generar peces
 
-    def actualizar(self, weight_level=0, rebound_level=0):
-        # Movimiento directo hacia el objetivo
+    def actualizar(self, weight_level=0, rebound_level=0, juego_ref=None):
+        # SISTEMA HÍBRIDO: Vuelo parabólico hasta punto máximo, luego caída vertical
         if not self.llegado and not self.rebotando:
-            # Calcular distancia al objetivo
-            dx = self.target_x - self.x_pos
-            dy = self.target_y - self.y_pos
-            dist_to_target = math.sqrt(dx*dx + dy*dy)
-            
-            # Si estamos cerca del objetivo, detenerse
-            if dist_to_target < self.speed:
-                self.x_pos = self.target_x
-                self.y_pos = self.target_y
-                self.vx = 0
-                self.vy = 0
-                self.llegado = True
-            else:
-                # Moverse hacia el objetivo
+            if self.fase == 'volando':
+                # Fase de vuelo con arco natural
                 self.x_pos += self.vx
                 self.y_pos += self.vy
+                self.vy += self.gravedad  # Aplicar gravedad durante el vuelo
+                
+                # Cuando alcance la distancia máxima horizontal o empiece a caer mucho
+                if self.x_pos >= self.distancia_maxima_alcanzada or self.vy > 3:
+                    # Cambiar a caída vertical recta
+                    self.fase = 'cayendo_vertical'
+                    self.vx = 0  # Detener movimiento horizontal
+                    self.vy = 2  # Velocidad inicial de caída vertical
             
-            # Detectar si entra al agua
-            if self.y_pos >= 350:
-                self.en_agua = True
+            elif self.fase == 'cayendo_vertical':
+                # Caída VERTICAL en línea recta (como en la imagen)
+                self.y_pos += self.vy
+                self.vy += 0.6  # Gravedad más fuerte en caída vertical
+                
+                # Detectar entrada al agua
+                if self.y_pos >= 350 and not self.en_agua:
+                    self.en_agua = True
+                    # Generar peces cuando toca el agua
+                    if not self.peces_generados and juego_ref:
+                        juego_ref.generar_peces(10)
+                        self.peces_generados = True
+                    # Reducir velocidad al entrar al agua
+                    self.vy *= 0.5
+                
+                # Resistencia del agua
+                if self.en_agua:
+                    self.vy *= 0.96
+                    if self.vy < 5:
+                        self.vy += 0.2
+                
+                # Profundidad máxima
+                profundidad_max = 600 + (weight_level * 50)
+                if self.y_pos >= profundidad_max:
+                    self.y_pos = profundidad_max
+                    self.vx = 0
+                    self.vy = 0
+                    self.llegado = True
         
         # WEIGHT: Profundidad máxima aumenta 15% por nivel
         profundidad_extra = weight_level * 0.15
@@ -251,7 +272,12 @@ class Bote:
         
         # Intentar cargar imagen del pescador
         try:
-            self.imagen_pescador = pygame.image.load('pescador.png').convert_alpha()
+            # Cargar imagen
+            raw_image = pygame.image.load('pescador.png')
+            # Establecer color key para transparencia (blanco)
+            raw_image.set_colorkey((255, 255, 255))
+            self.imagen_pescador = raw_image.convert_alpha()
+            
             # Escalar la imagen a un tamaño apropiado
             self.imagen_pescador = pygame.transform.scale(self.imagen_pescador, (200, 150))
             self.usar_imagen = True
@@ -420,12 +446,19 @@ class Juego:
         self.incremento_potencia = 1.5
         self.angulo_cana_reposo = -math.pi / 2.5
 
+        # Intentar cargar imagen de fondo
+        try:
+            self.imagen_fondo = pygame.image.load('fondo.png').convert()
+            self.imagen_fondo = pygame.transform.scale(self.imagen_fondo, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        except:
+            self.imagen_fondo = None
+
         self.bote = Bote(140, SCREEN_HEIGHT - 120)
         self.bote.angulo_cana = self.angulo_cana_reposo
         self.bote.game_ref = self
         self.linea = None
         self.peces = []
-        self.generar_peces(10)
+        # NO generar peces al inicio - solo cuando el anzuelo llegue al agua
 
         self.pescados = 0
         self.monedas = 0
@@ -449,7 +482,7 @@ class Juego:
             'rebound': 20,
             'resistance': 35
         }
-        self.base_distance = 400
+        self.base_distance = 1000  # MUCHO más lejos para que vuele y se vea como la imagen
         
         # Botones de mejora (se crean al inicio)
         self.upgrade_buttons = []
@@ -471,6 +504,10 @@ class Juego:
         self.anuncio_tiempo = 0
         self.anuncio_duracion = 300  # 5 segundos a 60 FPS
         self.anuncio_mejora_pendiente = None
+        
+        # Control del anzuelo con teclas
+        self.tecla_a_presionada = False
+        self.tecla_d_presionada = False
 
     def generar_peces(self, cantidad):
         self.peces = []
@@ -572,10 +609,27 @@ class Juego:
         if self.linea:
             weight_level = self.upgrades.get('weight', 0)
             rebound_level = self.upgrades.get('rebound', 0)
-            self.linea.actualizar(weight_level, rebound_level)
+            self.linea.actualizar(weight_level, rebound_level, juego_ref=self)
             # Actualizar profundidad
             profundidad_px = self.linea.y_pos - 350
             self.profundidad_actual = max(0, profundidad_px / (SCREEN_HEIGHT - 350) * 200)
+            
+            # Control con teclas A y D para mover el anzuelo horizontalmente
+            if self.estado in (EstadoJuego.LANZADO, EstadoJuego.PESCANDO):
+                velocidad_horizontal = 5.0
+                if self.tecla_a_presionada:
+                    self.linea.x_pos -= velocidad_horizontal
+                    # Agregar burbujas al moverse
+                    if random.random() < 0.1:
+                        self.agregar_particula(self.linea.x_pos, self.linea.y_pos, 'burbuja')
+                if self.tecla_d_presionada:
+                    self.linea.x_pos += velocidad_horizontal
+                    # Agregar burbujas al moverse
+                    if random.random() < 0.1:
+                        self.agregar_particula(self.linea.x_pos, self.linea.y_pos, 'burbuja')
+                
+                # Limitar el movimiento horizontal a los bordes de la pantalla
+                self.linea.x_pos = max(100, min(SCREEN_WIDTH - 100, self.linea.x_pos))
 
             # Reeling: si el jugador mantiene el click mientras la línea está lanzada, acercar el anzuelo
             if self.mouse_presionado and self.estado in (EstadoJuego.LANZADO, EstadoJuego.PESCANDO):
@@ -684,58 +738,63 @@ class Juego:
             self.dibujar_anuncio()
             return
         
-        # Fondo - Cielo degradado (amarillo)
-        for y in range(0, 350):
-            ratio = y / 350
-            color_cielo = (
-                int(CIELO_CLARO[0] + (CIELO_HORIZON[0] - CIELO_CLARO[0]) * ratio),
-                int(CIELO_CLARO[1] + (CIELO_HORIZON[1] - CIELO_CLARO[1]) * ratio),
-                int(CIELO_CLARO[2] + (CIELO_HORIZON[2] - CIELO_CLARO[2]) * ratio)
-            )
-            pygame.draw.line(self.pantalla, color_cielo, (0, y), (SCREEN_WIDTH, y))
+        # DIBUJAR FONDO Y ENTORNO
+        if self.imagen_fondo:
+            # Usar imagen de fondo si existe
+            self.pantalla.blit(self.imagen_fondo, (0, 0))
+        else:
+            # Fondo - Cielo degradado (amarillo)
+            for y in range(0, 350):
+                ratio = y / 350
+                color_cielo = (
+                    int(CIELO_CLARO[0] + (CIELO_HORIZON[0] - CIELO_CLARO[0]) * ratio),
+                    int(CIELO_CLARO[1] + (CIELO_HORIZON[1] - CIELO_CLARO[1]) * ratio),
+                    int(CIELO_CLARO[2] + (CIELO_HORIZON[2] - CIELO_CLARO[2]) * ratio)
+                )
+                pygame.draw.line(self.pantalla, color_cielo, (0, y), (SCREEN_WIDTH, y))
 
-        # Montañas simples en el fondo
-        self.dibujar_montanas()
-        
-        # Árboles
-        self.dibujar_arboles()
+            # Montañas simples en el fondo
+            self.dibujar_montanas()
+            
+            # Árboles
+            self.dibujar_arboles()
 
-        # Nubes simples
-        self.dibujar_nubes()
+            # Nubes simples
+            self.dibujar_nubes()
 
-        # Sol en el horizonte
-        sol_x = SCREEN_WIDTH // 2 + 150
-        sol_y = 200
-        pygame.draw.circle(self.pantalla, (255, 255, 100), (sol_x, sol_y), 80)
+            # Sol en el horizonte
+            sol_x = SCREEN_WIDTH // 2 + 150
+            sol_y = 200
+            pygame.draw.circle(self.pantalla, (255, 255, 100), (sol_x, sol_y), 80)
 
-        # Línea del horizonte (agua)
-        pygame.draw.line(self.pantalla, NEGRO, (0, 350), (SCREEN_WIDTH, 350), 2)
+            # Línea del horizonte (agua)
+            pygame.draw.line(self.pantalla, NEGRO, (0, 350), (SCREEN_WIDTH, 350), 2)
 
-        # Fondo - Agua degradada
-        for y in range(350, SCREEN_HEIGHT):
-            ratio = (y - 350) / (SCREEN_HEIGHT - 350)
-            color_agua = (
-                int(AGUA_SURFACE[0] + (AGUA_PROFUNDA[0] - AGUA_SURFACE[0]) * ratio),
-                int(AGUA_SURFACE[1] + (AGUA_PROFUNDA[1] - AGUA_SURFACE[1]) * ratio),
-                int(AGUA_SURFACE[2] + (AGUA_PROFUNDA[2] - AGUA_SURFACE[2]) * ratio)
-            )
-            pygame.draw.line(self.pantalla, color_agua, (0, y), (SCREEN_WIDTH, y))
+            # Fondo - Agua degradada
+            for y in range(350, SCREEN_HEIGHT):
+                ratio = (y - 350) / (SCREEN_HEIGHT - 350)
+                color_agua = (
+                    int(AGUA_SURFACE[0] + (AGUA_PROFUNDA[0] - AGUA_SURFACE[0]) * ratio),
+                    int(AGUA_SURFACE[1] + (AGUA_PROFUNDA[1] - AGUA_SURFACE[1]) * ratio),
+                    int(AGUA_SURFACE[2] + (AGUA_PROFUNDA[2] - AGUA_SURFACE[2]) * ratio)
+                )
+                pygame.draw.line(self.pantalla, color_agua, (0, y), (SCREEN_WIDTH, y))
 
-        # Olas sutiles en la superficie (superposición semi-transparente)
-        wave_surf = pygame.Surface((SCREEN_WIDTH, 60), pygame.SRCALPHA)
-        ticks = pygame.time.get_ticks() / 500.0
-        for x in range(0, SCREEN_WIDTH, 6):
-            y_off = math.sin((x / 60.0) + ticks) * 6
-            alpha = 40 + int(30 * math.sin((x / 120.0) + ticks * 0.5))
-            color = (255, 255, 255, max(10, alpha))
-            pygame.draw.circle(wave_surf, color, (x, int(30 + y_off)), 4)
-        self.pantalla.blit(wave_surf, (0, 340))
+            # Olas sutiles en la superficie (superposición semi-transparente)
+            wave_surf = pygame.Surface((SCREEN_WIDTH, 60), pygame.SRCALPHA)
+            ticks = pygame.time.get_ticks() / 500.0
+            for x in range(0, SCREEN_WIDTH, 6):
+                y_off = math.sin((x / 60.0) + ticks) * 6
+                alpha = 40 + int(30 * math.sin((x / 120.0) + ticks * 0.5))
+                color = (255, 255, 255, max(10, alpha))
+                pygame.draw.circle(wave_surf, color, (x, int(30 + y_off)), 4)
+            self.pantalla.blit(wave_surf, (0, 340))
 
-        # Rocas submarinas
-        self.dibujar_rocas()
+            # Rocas submarinas
+            self.dibujar_rocas()
 
-        # Plantas marinas simples
-        self.dibujar_plantas()
+            # Plantas marinas simples
+            self.dibujar_plantas()
 
         # Burbujas
         self.dibujar_burbujas()
@@ -1035,6 +1094,31 @@ class Juego:
 
             instruccion = self.fuente_pequeña.render("Haz CLICK para retirar", True, BLANCO)
             self.pantalla.blit(instruccion, (SCREEN_WIDTH // 2 - 120, SCREEN_HEIGHT // 2 + 20))
+        
+        # Instrucciones de control (como en la imagen de referencia)
+        self.dibujar_instrucciones()
+    
+    def dibujar_instrucciones(self):
+        """Dibujar instrucciones de control como en la imagen de referencia"""
+        # Posición en la parte inferior derecha
+        instr_x = SCREEN_WIDTH - 450
+        instr_y = SCREEN_HEIGHT - 100
+        
+        # Fondo semitransparente para las instrucciones
+        instr_surf = pygame.Surface((440, 80), pygame.SRCALPHA)
+        instr_surf.fill((20, 20, 40, 200))
+        self.pantalla.blit(instr_surf, (instr_x, instr_y))
+        
+        # Borde
+        pygame.draw.rect(self.pantalla, (100, 200, 255), (instr_x, instr_y, 440, 80), 2)
+        
+        # Texto de instrucciones
+        fuente_instr = pygame.font.Font(None, 22)
+        linea1 = fuente_instr.render("Use your mouse to move the reel,", True, BLANCO)
+        linea2 = fuente_instr.render("or press the A(←) and D(→) keys as an alternative.", True, BLANCO)
+        
+        self.pantalla.blit(linea1, (instr_x + 15, instr_y + 15))
+        self.pantalla.blit(linea2, (instr_x + 15, instr_y + 45))
     
     def dibujar_tienda(self):
         """Dibujar panel de tienda con botones de mejoras clicables"""
@@ -1265,9 +1349,16 @@ class Juego:
                     self.potencia = 0
                     self.incremento_potencia = 1.5
 
+                    # Ángulo horizontal para que vuele lejos como en la imagen
                     dx = mx - self.bote.x
                     dy = my - (self.bote.y - 70)
-                    self.angulo_lanzamiento = math.atan2(dy, dx)
+                    angulo_calculado = math.atan2(dy, dx)
+                    # Forzar ángulo MUY horizontal para vuelo lejano (±15°)
+                    if angulo_calculado > math.pi / 12:  # 15 grados máximo
+                        angulo_calculado = math.pi / 12
+                    if angulo_calculado < -math.pi / 12:  # -15 grados mínimo
+                        angulo_calculado = -math.pi / 12
+                    self.angulo_lanzamiento = angulo_calculado
                     self.bote.angulo_cana = self.angulo_lanzamiento
 
                 elif self.estado == EstadoJuego.LANZADO:
@@ -1285,7 +1376,13 @@ class Juego:
                     mouse_x, mouse_y = pygame.mouse.get_pos()
                     dx = mouse_x - self.bote.x
                     dy = mouse_y - (self.bote.y - 70)
-                    self.angulo_lanzamiento = math.atan2(dy, dx)
+                    angulo_calculado = math.atan2(dy, dx)
+                    # Ángulo muy horizontal (±15°)
+                    if angulo_calculado > math.pi / 12:
+                        angulo_calculado = math.pi / 12
+                    if angulo_calculado < -math.pi / 12:
+                        angulo_calculado = -math.pi / 12
+                    self.angulo_lanzamiento = angulo_calculado
                     
                     # Strength aumenta 5% la distancia por nivel
                     distancia_base = self.base_distance * (1 + self.upgrades.get('strength', 0) * 0.05)
@@ -1294,17 +1391,49 @@ class Juego:
                     self.bote.iniciar_lanzamiento()
                     self.estado = EstadoJuego.LANZADO
 
-            if evento.type == pygame.MOUSEMOTION and self.estado == EstadoJuego.CARGANDO:
-                mouse_x, mouse_y = pygame.mouse.get_pos()
-                dx = mouse_x - self.bote.x
-                dy = mouse_y - (self.bote.y - 70)
-                self.angulo_lanzamiento = math.atan2(dy, dx)
-                self.bote.angulo_cana = self.angulo_lanzamiento
+            if evento.type == pygame.MOUSEMOTION:
+                if self.estado == EstadoJuego.CARGANDO:
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+                    dx = mouse_x - self.bote.x
+                    dy = mouse_y - (self.bote.y - 70)
+                    angulo_calculado = math.atan2(dy, dx)
+                    # Ángulo muy horizontal (±15°)
+                    if angulo_calculado > math.pi / 12:
+                        angulo_calculado = math.pi / 12
+                    if angulo_calculado < -math.pi / 12:
+                        angulo_calculado = -math.pi / 12
+                    self.angulo_lanzamiento = angulo_calculado
+                    self.bote.angulo_cana = self.angulo_lanzamiento
+                elif self.estado in (EstadoJuego.LANZADO, EstadoJuego.PESCANDO):
+                    # Mover el anzuelo horizontalmente con el mouse
+                    if self.linea:
+                        mouse_x, _ = pygame.mouse.get_pos()
+                        # Mover el anzuelo hacia la posición X del mouse
+                        diff = mouse_x - self.linea.x_pos
+                        velocidad = 3.0
+                        if abs(diff) > 5:
+                            self.linea.x_pos += diff * 0.1  # Movimiento suave
+                            # Limitar a bordes
+                            self.linea.x_pos = max(100, min(SCREEN_WIDTH - 100, self.linea.x_pos))
+                            # Agregar burbujas
+                            if random.random() < 0.08:
+                                self.agregar_particula(self.linea.x_pos, self.linea.y_pos, 'burbuja')
             
-            # Tecla Q para ir a recompensas (para testing)
+            # Teclas de control
             if evento.type == pygame.KEYDOWN:
+                if evento.key == pygame.K_a or evento.key == pygame.K_LEFT:
+                    self.tecla_a_presionada = True
+                if evento.key == pygame.K_d or evento.key == pygame.K_RIGHT:
+                    self.tecla_d_presionada = True
+                # Tecla Q para ir a recompensas (para testing)
                 if evento.key == pygame.K_q:
                     self.cambiar_a_recompensas()
+            
+            if evento.type == pygame.KEYUP:
+                if evento.key == pygame.K_a or evento.key == pygame.K_LEFT:
+                    self.tecla_a_presionada = False
+                if evento.key == pygame.K_d or evento.key == pygame.K_RIGHT:
+                    self.tecla_d_presionada = False
 
         return True
 
