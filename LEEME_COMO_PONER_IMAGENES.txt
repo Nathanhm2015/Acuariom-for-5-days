@@ -1,27 +1,68 @@
-INSTRUCCIONES PARA PONER LAS IMAGENES
-=======================================
+1. Tema y Ambientación
+Escenario tropical con océano, islas y palmeras.
 
-El juego está listo para usar tus imágenes, pero como soy una IA, 
-no tengo permiso para guardar archivos directamente en tu disco duro.
+Estilo colorido y animado, pensado para ser atractivo y educativo.
 
-TIENES QUE HACER ESTO TÚ MISMO (Es muy fácil):
+Enfoque en la vida silvestre: aves marinas y peces.
 
-Paso 1: IMAGEN DEL PESCADOR
----------------------------
-1. Busca la imagen del pescador que enviaste en el chat.
-2. Arrastra la imagen o guárdala en esta carpeta:
-   c:\Users\natha\Nextcloud\Documents\Repos\Acuariom-for-5-days\
-3. CAMBIA EL NOMBRE del archivo a:
-   pescador.png
+2. Personajes y Mecánicas
+Aves jugables: pelícano, halcón, cormorán, águila pescadora (osprey).
 
-Paso 2: IMAGEN DEL FONDO
-------------------------
-1. Busca la imagen que quieres usar de fondo.
-2. Arrastra la imagen o guárdala en la misma carpeta.
-3. CAMBIA EL NOMBRE del archivo a:
-   fondo.png
+Cada ave tiene habilidades únicas:
 
-Paso 3: JUGAR
--------------
-¡Ejecuta el juego de nuevo y verás tus imágenes!
-Si falta alguna, el juego te avisará con letras rojas en la pantalla.
+Pelícano: atrapar peces grandes con su bolsa.
+
+Osprey (águila pescadora): bucear para capturar peces.
+
+Cormorán: nadar bajo el agua.
+
+Halcón: velocidad y maniobras aéreas.
+
+Transformación/selección de aves: botones circulares en pantalla permiten cambiar de ave durante la partida.
+
+3. Objetivos del Juego
+Capturar peces y “fishmobiles” (vehículos en forma de pez).
+
+Completar misiones dadas por personajes guías (ej. Chris, Martin).
+
+Acumular puntos (+1 aparece al atrapar peces).
+
+Superar niveles con retos progresivos.
+
+4. Interfaz y HUD
+Contador de peces (arriba a la izquierda).
+
+Barra de energía con ícono de rayo (gestiona stamina de las aves).
+
+Botones de transformación (izquierda y derecha con siluetas de aves).
+
+Indicadores de progreso: mensajes de personajes (“Martin: osprey button to dive”).
+
+Botón de configuración (ícono de engranaje).
+
+Botón PLAY para iniciar la partida.
+
+5. Dinámica de Juego
+Volar sobre el océano y sumergirse para atrapar peces.
+
+Evitar obstáculos y gestionar energía.
+
+Usar la habilidad correcta del ave según el tipo de pez o misión.
+
+Capturar “fishmobiles” en niveles especiales de persecución.
+
+Sistema de recompensas: puntos, medallas, desbloqueo de nuevas aves.
+
+6. Características Educativas
+Enseña sobre aves marinas y sus adaptaciones.
+
+Muestra ecosistemas tropicales y la cadena alimenticia.
+
+Refuerza conceptos de biología de manera interactiva.
+
+7. Estilo Visual y Sonoro
+Animación vibrante y colorida.
+
+Música alegre y efectos de sonido (alas, agua, peces atrapados).
+
+Narración de personajes que guían al jugador.
