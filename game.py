@@ -145,6 +145,22 @@ class Bird:
         self.wing_color = pal['wing']
         self.beak_color = pal['beak']
 
+        # Sprite images (replace hand-drawn polygons)
+        self.sprite      = None
+        self.sprite_base = None   # unscaled/unrotated reference
+        _sprite_files = {
+            'pelican': ('images/pelicano.png',       (115, 78)),
+            'osprey':  ('images/ave pescador.png',   (100, 70)),
+        }
+        if bird_type in _sprite_files:
+            path, size = _sprite_files[bird_type]
+            try:
+                raw = pygame.image.load(path).convert_alpha()
+                self.sprite_base = pygame.transform.scale(raw, size)
+                self.sprite      = self.sprite_base
+            except Exception as e:
+                print(f"{path} not loaded: {e}")
+
     # ── movement with arrow keys ──────────────────
     def move(self, dx, dy):
         if self.state != 'flying':
@@ -209,6 +225,44 @@ class Bird:
 
     # ── draw ──────────────────────────────────────
     def draw(self, screen):
+        # ── sprite path (both birds, all states) ──────
+        if self.sprite_base:
+            cx, cy = int(self.x), int(self.y)
+            base_w, base_h = self.sprite_base.get_size()
+            if self.state == 'flying':
+                flap = math.sin(self.frame * 0.18)        # -1 .. +1
+                w    = base_w
+                h    = int(base_h + flap * 10)            # oscillates ±10 px
+                h    = max(20, h)
+                surf = pygame.transform.scale(self.sprite_base, (w, h))
+                if not self.facing_right:
+                    surf = pygame.transform.flip(surf, True, False)
+                screen.blit(surf, (cx - w // 2, cy - h // 2))
+            else:
+                if self.state == 'diving':
+                    rot_angle = -82
+                elif self.state == 'underwater':
+                    rot_angle = -75
+                else:                                      # rising
+                    rot_angle = 75
+                surf = self.sprite_base
+                if not self.facing_right:
+                    surf = pygame.transform.flip(surf, True, False)
+                surf = pygame.transform.rotate(surf, rot_angle)
+                r = surf.get_rect(center=(cx, cy))
+                screen.blit(surf, r)
+                # bubbles while underwater
+                if self.state == 'underwater' and self.frame % 7 == 0:
+                    bx = cx + random.randint(-14, 14)
+                    by = cy - random.randint(5, 22)
+                    pygame.draw.circle(screen, (180, 220, 255), (bx, by), 4, 1)
+                # caught fish while rising
+                if self.caught_fish and self.state == 'rising':
+                    fx = cx + (30 if self.facing_right else -30)
+                    fy = cy + 20
+                    pygame.draw.ellipse(screen, self.caught_fish.color,
+                                        (fx - 11, fy - 6, 22, 12))
+            return
         cx  = int(self.x)
         cy  = int(self.y)
         env = self.wingspan
