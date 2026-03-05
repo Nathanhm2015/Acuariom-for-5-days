@@ -4,6 +4,28 @@ import random
 import sys
 from enum import Enum
 
+# Optional Pillow — used to load animated GIF frames
+try:
+    from PIL import Image as _PILImage
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
+
+def _load_gif_frames(path):
+    """Return a list of pygame surfaces, one per GIF frame."""
+    frames = []
+    with _PILImage.open(path) as gif:
+        for i in range(getattr(gif, 'n_frames', 1)):
+            gif.seek(i)
+            frame = gif.convert('RGBA')
+            surf = pygame.image.fromstring(
+                frame.tobytes(), frame.size, 'RGBA'
+            ).convert_alpha()
+            frames.append(surf)
+    return frames
+
+
 pygame.init()
 
 SCREEN_WIDTH  = 1000
@@ -145,21 +167,30 @@ class Bird:
         self.wing_color = pal['wing']
         self.beak_color = pal['beak']
 
-        # Sprite images (replace hand-drawn polygons)
-        self.sprite      = None
-        self.sprite_base = None   # unscaled/unrotated reference
-        _sprite_files = {
-            'pelican': ('images/pelicano.png',       (115, 78)),
-            'osprey':  ('images/ave pescador.png',   (100, 70)),
+        # Sprite frames for animation (GIF) + static base for rotated states
+        self.frames      = []    # list of pygame surfaces (flying frames)
+        self.sprite_base = None  # first frame / static reference
+        _bird_assets = {
+            'pelican': ('images/pelicano.gif',     'images/pelicano.png',     (115, 78)),
+            'osprey':  ('images/ave_pescador.gif', 'images/ave pescador.png', (100, 70)),
         }
-        if bird_type in _sprite_files:
-            path, size = _sprite_files[bird_type]
-            try:
-                raw = pygame.image.load(path).convert_alpha()
-                self.sprite_base = pygame.transform.scale(raw, size)
-                self.sprite      = self.sprite_base
-            except Exception as e:
-                print(f"{path} not loaded: {e}")
+        if bird_type in _bird_assets:
+            gif_path, png_path, size = _bird_assets[bird_type]
+            # 1) Try animated GIF (requires Pillow + make_gifs.py to have been run)
+            if _PIL_OK:
+                try:
+                    self.frames = _load_gif_frames(gif_path)
+                    self.sprite_base = self.frames[0]
+                except Exception as e:
+                    print(f"{gif_path} not loaded: {e}")
+            # 2) Fall back to static PNG
+            if not self.frames:
+                try:
+                    raw = pygame.image.load(png_path).convert_alpha()
+                    self.sprite_base = pygame.transform.scale(raw, size)
+                    self.frames = [self.sprite_base]
+                except Exception as e:
+                    print(f"{png_path} not loaded: {e}")
 
     # ── movement with arrow keys ──────────────────
     def move(self, dx, dy):
@@ -228,15 +259,12 @@ class Bird:
         # ── sprite path (both birds, all states) ──────
         if self.sprite_base:
             cx, cy = int(self.x), int(self.y)
-            base_w, base_h = self.sprite_base.get_size()
             if self.state == 'flying':
-                flap = math.sin(self.frame * 0.18)        # -1 .. +1
-                w    = base_w
-                h    = int(base_h + flap * 10)            # oscillates ±10 px
-                h    = max(20, h)
-                surf = pygame.transform.scale(self.sprite_base, (w, h))
+                # Cycle through pre-computed GIF frames
+                surf = self.frames[self.frame % len(self.frames)]
                 if not self.facing_right:
                     surf = pygame.transform.flip(surf, True, False)
+                w, h = surf.get_size()
                 screen.blit(surf, (cx - w // 2, cy - h // 2))
             else:
                 if self.state == 'diving':
