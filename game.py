@@ -38,6 +38,7 @@ class EstadoJuego(Enum):
     PICANDO   = 3
     BAJO_AGUA = 4
     SUBIENDO  = 5
+    SETTINGS  = 6
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -108,20 +109,12 @@ class Pez:
 class Ave:
     """
     tipo: 'pelicano' | 'osprey'
-      Pelícano  → verde/negro, más lento, radio captura grande, bolsa gular
-      Osprey    → gris/azul, más rápido, picada acelerada
+      Pelícano pardo  → blanco/crema + alas marrón oscuro, pico gris, bolsa naranja
+      Osprey          → espalda marrón, pecho blanco, máscara ocular oscura, ojo amarillo
     """
     CONFIGS = {
-        'pelicano': dict(
-            vel=3.5, vel_picada=9, radio_captura=42,
-            color_cuerpo=(55, 110, 55), color_ala=(20, 55, 20),
-            color_pico=(225, 155, 35), envergadura=72,
-        ),
-        'osprey': dict(
-            vel=5.0, vel_picada=13, radio_captura=28,
-            color_cuerpo=(165, 175, 185), color_ala=(38, 48, 68),
-            color_pico=(45,  45,  55), envergadura=60,
-        ),
+        'pelicano': dict(vel=3.5, vel_picada=9,  radio_captura=48, envergadura=95),
+        'osprey':   dict(vel=5.0, vel_picada=13, radio_captura=32, envergadura=78),
     }
 
     def __init__(self, tipo, x, y):
@@ -130,14 +123,11 @@ class Ave:
         self.y      = float(y)
         self.vx     = 0.0
         self.vy     = 0.0
-        self.estado = 'volando'   # volando | picando | bajo_agua | subiendo
+        self.estado = 'volando'
         cfg = self.CONFIGS[tipo]
         self.vel            = cfg['vel']
         self.vel_picada     = cfg['vel_picada']
         self.radio_captura  = cfg['radio_captura']
-        self.color_cuerpo   = cfg['color_cuerpo']
-        self.color_ala      = cfg['color_ala']
-        self.color_pico     = cfg['color_pico']
         self.envergadura    = cfg['envergadura']
         self.angulo         = 0.0
         self.frame          = 0
@@ -339,10 +329,13 @@ class Juego:
         }
 
         # ── rects HUD ──────────────────────────
-        self.btn_play     = pygame.Rect(SCREEN_WIDTH - 200, 18, 178, 58)
-        self.btn_pelicano = pygame.Rect(18,  SCREEN_HEIGHT - 132, 110, 110)
-        self.btn_osprey   = pygame.Rect(SCREEN_WIDTH - 128, SCREEN_HEIGHT - 132, 110, 110)
-        self.btn_gear     = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)
+        self.btn_play          = pygame.Rect(SCREEN_WIDTH - 200, 18, 178, 58)
+        self.btn_pelicano      = pygame.Rect(18,  SCREEN_HEIGHT - 132, 110, 110)
+        self.btn_osprey        = pygame.Rect(SCREEN_WIDTH - 128, SCREEN_HEIGHT - 132, 110, 110)
+        self.btn_gear          = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)   # engranaje derecha
+        self.btn_gear_izq      = pygame.Rect(10, 10, 48, 48)                  # engranaje izquierda
+        self.estado_prev       = EstadoJuego.VOLANDO   # para volver al salir de settings
+        self.btn_cerrar_settings = pygame.Rect(SCREEN_WIDTH//2 + 210, SCREEN_HEIGHT//2 - 220, 40, 40)
 
         # ── nubes animadas ──────────────────────
         self.nubes = [(random.randint(0, SCREEN_WIDTH),
@@ -381,6 +374,16 @@ class Juego:
                 if ev.key in self.teclas:
                     self.teclas[ev.key] = True
 
+                # ESC cierra settings o vuelve al inicio
+                if ev.key == pygame.K_ESCAPE:
+                    if self.estado == EstadoJuego.SETTINGS:
+                        self.estado = self.estado_prev
+                    else:
+                        self.estado = EstadoJuego.INICIO
+
+                if self.estado == EstadoJuego.SETTINGS:
+                    continue
+
                 if ev.key == pygame.K_SPACE:
                     self._zambullir(self.ave_activa)
 
@@ -394,15 +397,24 @@ class Juego:
                     self._zambullir(self.osprey)
                     self._agregar_mensaje("Martin: Osprey button to dive!")
 
-                if ev.key == pygame.K_ESCAPE:
-                    self.estado = EstadoJuego.INICIO
-
             if ev.type == pygame.KEYUP:
                 if ev.key in self.teclas:
                     self.teclas[ev.key] = False
 
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mx, my = pygame.mouse.get_pos()
+
+                # ── Pantalla SETTINGS ────────────────────
+                if self.estado == EstadoJuego.SETTINGS:
+                    if self.btn_cerrar_settings.collidepoint(mx, my):
+                        self.estado = self.estado_prev
+                    return True
+
+                # ── Botón engranaje izquierdo → settings ─
+                if self.btn_gear_izq.collidepoint(mx, my):
+                    self.estado_prev = self.estado if self.estado != EstadoJuego.INICIO else EstadoJuego.VOLANDO
+                    self.estado = EstadoJuego.SETTINGS
+                    return True
 
                 if self.estado == EstadoJuego.INICIO:
                     if self.btn_play.collidepoint(mx, my):
@@ -447,7 +459,7 @@ class Juego:
     #  ACTUALIZAR
     # ═══════════════════════════════════════════
     def actualizar(self):
-        if self.estado == EstadoJuego.INICIO:
+        if self.estado in (EstadoJuego.INICIO, EstadoJuego.SETTINGS):
             # mover nubes igualmente
             self._actualizar_nubes()
             return
@@ -540,7 +552,7 @@ class Juego:
     # ═══════════════════════════════════════════
     def dibujar(self):
         self._dibujar_fondo()
-        if self.estado != EstadoJuego.INICIO:
+        if self.estado not in (EstadoJuego.INICIO, EstadoJuego.SETTINGS):
             self._dibujar_agua()
 
         self._dibujar_peces()
@@ -549,6 +561,9 @@ class Juego:
 
         if self.estado == EstadoJuego.INICIO:
             self._dibujar_pantalla_inicio()
+        elif self.estado == EstadoJuego.SETTINGS:
+            self._dibujar_hud()
+            self._dibujar_panel_settings()
         else:
             self._dibujar_hud()
 
@@ -663,8 +678,10 @@ class Juego:
                              (bx, by, relleno, bh), border_radius=6)
         pygame.draw.rect(self.pantalla, (180, 80, 20), (bx, by, bw, bh), 2, border_radius=6)
 
-        # ── engranaje ───────────────────────────
+        # ── engranaje derecha ──────────────────
         self._icono_engranaje(SCREEN_WIDTH - 34, 34, 22)
+        # ── engranaje izquierda (settings) ───────
+        self._icono_engranaje(self.btn_gear_izq.centerx, self.btn_gear_izq.centery, 16)
 
         # ── mensaje de guía ─────────────────────
         if self.mensajes_guia:
@@ -820,8 +837,10 @@ class Juego:
         self.pantalla.blit(pt, (self.btn_play.centerx - pt.get_width()//2,
                                 self.btn_play.centery - pt.get_height()//2))
 
-        # engranaje
+        # engranaje derecha
         self._icono_engranaje(SCREEN_WIDTH - 34, 34, 22)
+        # engranaje izquierda
+        self._icono_engranaje(self.btn_gear_izq.centerx, self.btn_gear_izq.centery, 16)
 
         # preview de las aves
         self.pelicano.x, self.pelicano.y = 760, 210
@@ -829,6 +848,96 @@ class Juego:
         self.pelicano.mirando_der = False
         self.osprey.mirando_der   = True
         self._dibujar_aves()
+
+
+    # ═══════════════════════════════════════
+    #  PANEL DE SETTINGS / INSTRUCCIONES
+    # ═══════════════════════════════════════
+    def _dibujar_panel_settings(self):
+        pw, ph = 480, 440
+        px = SCREEN_WIDTH  // 2 - pw // 2
+        py = SCREEN_HEIGHT // 2 - ph // 2
+
+        # fondo oscuro con transparencia
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        self.pantalla.blit(overlay, (0, 0))
+
+        # panel principal
+        panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        panel.fill((15, 30, 55, 235))
+        self.pantalla.blit(panel, (px, py))
+        pygame.draw.rect(self.pantalla, (80, 160, 230), (px, py, pw, ph), 3, border_radius=16)
+
+        # franja de título
+        pygame.draw.rect(self.pantalla, (30, 70, 130), (px, py, pw, 52), border_radius=16)
+        titulo = self.ftitulo.render("SETTINGS", True, BLANCO)
+        self.pantalla.blit(titulo, (px + pw//2 - titulo.get_width()//2, py + 10))
+
+        # engranaje decorativo en título
+        self._icono_engranaje(px + 30, py + 26, 14)
+
+        # botón CERRAR  ✕
+        cerrar_rect = self.btn_cerrar_settings
+        cerrar_rect.topleft = (px + pw - 46, py + 6)
+        pygame.draw.rect(self.pantalla, (180, 50, 50), cerrar_rect, border_radius=8)
+        pygame.draw.rect(self.pantalla, (230, 90, 90), cerrar_rect, 2, border_radius=8)
+        x_txt = self.fuente.render("X", True, BLANCO)
+        self.pantalla.blit(x_txt, (cerrar_rect.centerx - x_txt.get_width()//2,
+                                    cerrar_rect.centery - x_txt.get_height()//2))
+
+        # ── sección: CONTROLES ──────────────────
+        iy = py + 68
+        secc_font = pygame.font.Font(None, 26)
+        titulo_secc = secc_font.render("CONTROLS", True, (130, 200, 255))
+        self.pantalla.blit(titulo_secc, (px + 20, iy))
+        pygame.draw.line(self.pantalla, (80, 130, 200),
+                         (px + 20, iy + 22), (px + pw - 20, iy + 22), 1)
+        iy += 32
+
+        linea_font = pygame.font.Font(None, 22)
+        controles = [
+            ("Arrow LEFT / RIGHT",  "Move the active bird horizontally"),
+            ("Arrow UP",            "Fly upward / gain height"),
+            ("Arrow DOWN",          "Descend toward the water"),
+            ("A  key",              "Select PELICAN and dive"),
+            ("D  key",              "Select OSPREY and dive"),
+            ("SPACE  /  Click",     "Active bird dives"),
+            ("ESC",                 "Return to previous screen"),
+        ]
+        for tecla, desc in controles:
+            # tecla en caja
+            tecla_sur = linea_font.render(tecla, True, (255, 220, 80))
+            desc_sur  = linea_font.render(desc,  True, (210, 230, 255))
+            tecla_bg  = pygame.Rect(px + 16, iy - 2, 148, 22)
+            pygame.draw.rect(self.pantalla, (35, 55, 90), tecla_bg, border_radius=4)
+            pygame.draw.rect(self.pantalla, (70, 100, 160), tecla_bg, 1, border_radius=4)
+            self.pantalla.blit(tecla_sur, (px + 20, iy))
+            self.pantalla.blit(desc_sur,  (px + 174, iy))
+            iy += 26
+
+        # ── sección: BIRDS ──────────────────────
+        iy += 8
+        titulo_secc2 = secc_font.render("BIRDS", True, (130, 200, 255))
+        self.pantalla.blit(titulo_secc2, (px + 20, iy))
+        pygame.draw.line(self.pantalla, (80, 130, 200),
+                         (px + 20, iy + 22), (px + pw - 20, iy + 22), 1)
+        iy += 32
+
+        aves_info = [
+            ("PELICAN",  "[A]", "Slow, wide capture range. Gular pouch catches big fish."),
+            ("OSPREY",   "[D]", "Fast, precise dive. Best for quick single-fish catches."),
+        ]
+        for nombre, tecla, desc in aves_info:
+            n_sur = linea_font.render(f"{nombre}  {tecla}", True, (255, 220, 80))
+            d_sur = linea_font.render(desc, True, (210, 230, 255))
+            self.pantalla.blit(n_sur, (px + 20, iy))
+            self.pantalla.blit(d_sur, (px + 20, iy + 20))
+            iy += 48
+
+        # ── pie: ESC para cerrar ─────────────────
+        esc_sur = linea_font.render("Press ESC or click X to close", True, (150, 160, 180))
+        self.pantalla.blit(esc_sur, (px + pw//2 - esc_sur.get_width()//2, py + ph - 28))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
