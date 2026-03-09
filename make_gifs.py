@@ -8,7 +8,7 @@ import math
 from PIL import Image
 
 
-def make_flap_gif(src_path, dst_path, target_size, n_frames=16, duration=50):
+def make_flap_gif(src_path, dst_path, target_size, n_frames=16, duration=120):
     """
     Build a looping GIF that squishes/stretches the image vertically
     to simulate a wing-beat cycle.

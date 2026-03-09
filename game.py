@@ -266,8 +266,8 @@ class Bird:
         if self.sprite_base:
             cx, cy = int(self.x), int(self.y)
             if self.state == 'flying':
-                # Cycle through pre-computed GIF frames
-                surf = self.frames[self.frame % len(self.frames)]
+                # Cycle through pre-computed GIF frames (// 4 → ~15 fps animation at 60 fps game)
+                surf = self.frames[(self.frame // 4) % len(self.frames)]
                 # GIF sprites face left by default — flip to face right
                 if self.facing_right:
                     surf = pygame.transform.flip(surf, True, False)
