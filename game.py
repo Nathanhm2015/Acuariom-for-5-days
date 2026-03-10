@@ -76,6 +76,7 @@ class GameState(Enum):
     UNDERWATER = 4
     RISING     = 5
     SETTINGS   = 6
+    GAME_OVER  = 7
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,8 +151,13 @@ class Bird:
       Osprey        -> white chest, dark-brown wings, dark hooked beak, yellow eye
     """
     CONFIGS = {
-        'pelican': dict(speed=3.5, dive_speed=9,  capture_radius=48, wingspan=95),
-        'osprey':  dict(speed=5.0, dive_speed=13, capture_radius=32, wingspan=78),
+        # max_depth : pixels below WATER_Y the bird can reach
+        # uw_entry_vy : downward speed when first entering the water
+        # uw_decay    : velocity multiplier each frame underwater (closer to 1 = goes deeper)
+        'pelican': dict(speed=3.5, dive_speed=9,  capture_radius=48, wingspan=95,
+                        max_depth=270, uw_entry_vy=5.5, uw_decay=0.982),
+        'osprey':  dict(speed=5.0, dive_speed=13, capture_radius=32, wingspan=78,
+                        max_depth=65, uw_entry_vy=2.0, uw_decay=0.970),
     }
 
     # Real-life color palettes
@@ -172,6 +178,9 @@ class Bird:
         self.dive_speed     = cfg['dive_speed']
         self.capture_radius = cfg['capture_radius']
         self.wingspan       = cfg['wingspan']
+        self.max_depth      = cfg['max_depth']
+        self.uw_entry_vy    = cfg['uw_entry_vy']
+        self.uw_decay       = cfg['uw_decay']
         self.angle          = 0.0
         self.frame          = 0
         self.caught_fish    = None
@@ -238,18 +247,18 @@ class Bird:
             self.y += self.vy
             if self.y >= WATER_Y + 15:
                 self.state = 'underwater'
-                self.vy = self.dive_speed * 0.3
+                self.vy = self.uw_entry_vy
 
         elif self.state == 'underwater':
             self.x += self.vx
             self.y += self.vy
-            self.vy *= 0.91
+            self.vy *= self.uw_decay
             self.y   = min(self.y, SCREEN_HEIGHT - 20)
 
         elif self.state == 'rising':
             self.x += self.vx
             self.y += self.vy
-            self.vy -= 0.55
+            self.vy -= 0.22
             if self.y < WATER_Y - 25:
                 self.state = 'flying'
                 self.vy = -2.0
@@ -415,6 +424,8 @@ class Game:
         self.caught_count = 0
         self.stamina      = 100.0
         self.max_stamina  = 100.0
+        # passive drain: empty in 20 s if no fish caught
+        self._stamina_drain = 100.0 / (20 * FPS)
 
         self.guide_messages = []
         self._add_message("Chris: Press Play to begin the game.")
@@ -438,6 +449,12 @@ class Game:
         self.btn_gear_left      = pygame.Rect(10, 10, 48, 48)                  # left gear (settings)
         self.prev_state         = GameState.FLYING   # state to restore when closing settings
         self.btn_close_settings = pygame.Rect(SCREEN_WIDTH//2 + 210, SCREEN_HEIGHT//2 - 220, 40, 40)
+
+        # ── game-over buttons ────────────────────
+        cx = SCREEN_WIDTH // 2
+        self.btn_retry     = pygame.Rect(cx - 185, 420, 175, 58)
+        self.btn_restart   = pygame.Rect(cx + 10,  420, 175, 58)
+        self.btn_quit_game = pygame.Rect(cx - 87,  498, 175, 58)
 
         # ── animated clouds ──────────────────────
         self.clouds = [(random.randint(0, SCREEN_WIDTH),
@@ -506,6 +523,21 @@ class Game:
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mx, my = pygame.mouse.get_pos()
 
+                # ── GAME OVER screen ─────────────────────
+                if self.state == GameState.GAME_OVER:
+                    if self.btn_retry.collidepoint(mx, my):
+                        self._start_game()
+                        self.stamina = self.max_stamina
+                    elif self.btn_restart.collidepoint(mx, my):
+                        self.caught_count = 0
+                        self.fish_list = [Fish() for _ in range(14)]
+                        self._start_game()
+                        self.stamina = self.max_stamina
+                    elif self.btn_quit_game.collidepoint(mx, my):
+                        pygame.quit()
+                        sys.exit()
+                    return True
+
                 # ── SETTINGS screen ──────────────────────
                 if self.state == GameState.SETTINGS:
                     if self.btn_close_settings.collidepoint(mx, my):
@@ -561,8 +593,8 @@ class Game:
     #  UPDATE
     # ═══════════════════════════════════════════
     def update(self):
-        if self.state in (GameState.START, GameState.SETTINGS):
-            # clouds still move on menu/settings screens
+        if self.state in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER):
+            # clouds still move on menu/settings/game-over screens
             self._update_clouds()
             return
 
@@ -578,9 +610,11 @@ class Game:
         self.pelican.update()
         self.osprey.update()
 
-        # ── stamina recharges while flying ───────
-        if self.state == GameState.FLYING:
-            self.stamina = min(self.max_stamina, self.stamina + 0.18)
+        # ── stamina drains passively (20 s without a catch = empty) ──
+        if self.state not in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER):
+            self.stamina = max(0.0, self.stamina - self._stamina_drain)
+            if self.stamina <= 0 and self.state != GameState.GAME_OVER:
+                self.state = GameState.GAME_OVER
 
         # ── update fish ──────────────────────────
         for fish in self.fish_list:
@@ -595,7 +629,6 @@ class Game:
 
         elif self.state == GameState.UNDERWATER:
             bird = self.active_bird
-            captured = False
             for fish in self.fish_list:
                 if not fish.alive:
                     continue
@@ -603,24 +636,43 @@ class Game:
                 if dist < bird.capture_radius + fish.radius:
                     fish.alive        = False
                     bird.caught_fish  = fish
-                    bird.state        = 'rising'
-                    bird.vy           = -bird.dive_speed * 0.75
                     self.caught_count += 1
+                    self.stamina = min(self.max_stamina, self.stamina + 30)
                     self._add_floater(bird.x, bird.y - 30)
                     self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
-                    self.state        = GameState.RISING
                     self.fish_list.append(Fish())
-                    captured = True
-                    break
+                    if bird.bird_type == 'osprey':
+                        # osprey rises immediately after one catch
+                        bird.state = 'rising'
+                        bird.vy    = -bird.dive_speed * 0.38
+                        self.state = GameState.RISING
+                    break  # at most one fish per frame
 
-            # no fish caught → surface if deep enough
-            if not captured and bird.state == 'underwater' and bird.y > WATER_Y + 90:
+            # surface when reaching max depth OR when the bird has nearly stopped sinking
+            if bird.state == 'underwater' and (
+                    bird.y > WATER_Y + bird.max_depth or bird.vy < 0.25):
+                bird.y     = min(bird.y, WATER_Y + bird.max_depth)
                 bird.state = 'rising'
-                bird.vy    = -bird.dive_speed * 0.5
+                bird.vy    = -bird.dive_speed * 0.25
                 self.state = GameState.RISING
 
         elif self.state == GameState.RISING:
             bird = self.active_bird
+            # pelican keeps catching fish while rising back to the surface
+            if bird.bird_type == 'pelican':
+                for fish in self.fish_list:
+                    if not fish.alive:
+                        continue
+                    dist = math.hypot(bird.x - fish.x, bird.y - fish.y)
+                    if dist < bird.capture_radius + fish.radius:
+                        fish.alive        = False
+                        bird.caught_fish  = fish
+                        self.caught_count += 1
+                        self.stamina = min(self.max_stamina, self.stamina + 30)
+                        self._add_floater(bird.x, bird.y - 30)
+                        self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
+                        self.fish_list.append(Fish())
+                        break  # one per frame
             if bird.state == 'flying':
                 bird.caught_fish = None
                 self.state       = GameState.FLYING
@@ -666,6 +718,8 @@ class Game:
         elif self.state == GameState.SETTINGS:
             self._draw_hud()
             self._draw_settings_panel()
+        elif self.state == GameState.GAME_OVER:
+            self._draw_game_over()
         else:
             self._draw_hud()
 
@@ -1038,6 +1092,49 @@ class Game:
         # ── footer ───────────────────────────────
         footer = line_font.render("Press ESC or click X to close", True, (150, 160, 180))
         self.screen.blit(footer, (px + pw//2 - footer.get_width()//2, py + ph - 28))
+
+    # ═══════════════════════════════════════════
+    #  GAME OVER SCREEN
+    # ═══════════════════════════════════════════
+    def _draw_game_over(self):
+        # dim the background
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 185))
+        self.screen.blit(overlay, (0, 0))
+
+        cx = SCREEN_WIDTH // 2
+
+        # ── "SIN ENERGÍA" title ────────────────
+        title = self.font_lg.render("SIN ENERGÍA", True, (255, 80, 60))
+        self.screen.blit(title, (cx - title.get_width() // 2, 170))
+
+        # ── fish count ─────────────────────────
+        count_txt = self.font_title.render(
+            f"¡Atrapaste {self.caught_count} pescado{'s' if self.caught_count != 1 else ''}!",
+            True, (255, 220, 60))
+        self.screen.blit(count_txt, (cx - count_txt.get_width() // 2, 268))
+
+        # ── decorative fish icons ──────────────
+        for i, ox in enumerate([-80, 0, 80]):
+            self._icon_fish(cx + ox, 340)
+
+        # ── helper to draw a button ────────────
+        def draw_btn(rect, color, border_color, label):
+            pygame.draw.rect(self.screen, color,        rect, border_radius=14)
+            pygame.draw.rect(self.screen, border_color, rect, 3, border_radius=14)
+            s = self.font_sm.render(label, True, WHITE)
+            self.screen.blit(s, (rect.centerx - s.get_width() // 2,
+                                  rect.centery - s.get_height() // 2))
+
+        draw_btn(self.btn_retry,     (40, 130, 55),  (80, 210, 100),  "Volverle a intentar")
+        draw_btn(self.btn_restart,   (30,  80, 160), (80, 150, 230),  "Volver a empezar")
+        draw_btn(self.btn_quit_game, (160, 40,  40), (230, 90,  90),  "Salir del juego")
+
+        # ── hint ──────────────────────────────
+        hint = self.font_sm.render(
+            '"Intentar" mantiene tu puntaje  ·  "Empezar" lo reinicia a 0',
+            True, (180, 190, 210))
+        self.screen.blit(hint, (cx - hint.get_width() // 2, 570))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
