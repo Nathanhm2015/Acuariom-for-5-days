@@ -770,7 +770,7 @@ class Game:
                     self._add_floater(bird.x, bird.y - 30)
                     self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
                     self.fish_list.append(Fish())
-                    break  # at most one fish per frame
+                    # pelican: keep going; osprey: also keep catching (no early break)
 
             # ── crab collision (pelican only) ─────
             if bird.bird_type == 'pelican':
@@ -797,21 +797,19 @@ class Game:
 
         elif self.state == GameState.RISING:
             bird = self.active_bird
-            # pelican keeps catching fish while rising back to the surface
-            if bird.bird_type == 'pelican':
-                for fish in self.fish_list:
-                    if not fish.alive:
-                        continue
-                    dist = math.hypot(bird.x - fish.x, bird.y - fish.y)
-                    if dist < bird.capture_radius + fish.radius:
-                        fish.alive        = False
-                        bird.caught_fish  = fish
-                        self.caught_count += 1
-                        self.stamina = min(self.max_stamina, self.stamina + 12)
-                        self._add_floater(bird.x, bird.y - 30)
-                        self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
-                        self.fish_list.append(Fish())
-                        break  # one per frame
+            # both birds keep catching fish while rising back to the surface
+            for fish in self.fish_list:
+                if not fish.alive:
+                    continue
+                dist = math.hypot(bird.x - fish.x, bird.y - fish.y)
+                if dist < bird.capture_radius + fish.radius:
+                    fish.alive        = False
+                    bird.caught_fish  = fish
+                    self.caught_count += 1
+                    self.stamina = min(self.max_stamina, self.stamina + 12)
+                    self._add_floater(bird.x, bird.y - 30)
+                    self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
+                    self.fish_list.append(Fish())
             if bird.state == 'flying':
                 bird.caught_fish = None
                 self.state       = GameState.FLYING
