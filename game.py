@@ -157,7 +157,7 @@ class Bird:
         'pelican': dict(speed=3.5, dive_speed=9,  capture_radius=48, wingspan=95,
                         max_depth=270, uw_entry_vy=5.5, uw_decay=0.982),
         'osprey':  dict(speed=5.0, dive_speed=13, capture_radius=32, wingspan=78,
-                        max_depth=65, uw_entry_vy=2.0, uw_decay=0.970),
+                        max_depth=140, uw_entry_vy=3.5, uw_decay=0.978),
     }
 
     # Real-life color palettes
@@ -637,15 +637,10 @@ class Game:
                     fish.alive        = False
                     bird.caught_fish  = fish
                     self.caught_count += 1
-                    self.stamina = min(self.max_stamina, self.stamina + 30)
+                    self.stamina = min(self.max_stamina, self.stamina + 12)
                     self._add_floater(bird.x, bird.y - 30)
                     self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
                     self.fish_list.append(Fish())
-                    if bird.bird_type == 'osprey':
-                        # osprey rises immediately after one catch
-                        bird.state = 'rising'
-                        bird.vy    = -bird.dive_speed * 0.38
-                        self.state = GameState.RISING
                     break  # at most one fish per frame
 
             # surface when reaching max depth OR when the bird has nearly stopped sinking
@@ -668,7 +663,7 @@ class Game:
                         fish.alive        = False
                         bird.caught_fish  = fish
                         self.caught_count += 1
-                        self.stamina = min(self.max_stamina, self.stamina + 30)
+                        self.stamina = min(self.max_stamina, self.stamina + 12)
                         self._add_floater(bird.x, bird.y - 30)
                         self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
                         self.fish_list.append(Fish())
