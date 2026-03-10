@@ -80,6 +80,75 @@ class GameState(Enum):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  SALMON CLASS  (GIF sprite, medium speed)
+# ═══════════════════════════════════════════════════════════════════════════
+_salmon_frames = []   # loaded once, shared across all Salmon instances
+
+def _ensure_salmon_frames():
+    global _salmon_frames
+    if _salmon_frames or not _PIL_OK:
+        return
+    try:
+        raw = _load_gif_frames('animation/salmon.gif')
+        _salmon_frames = [pygame.transform.scale(f, (72, 36)) for f in raw]
+    except Exception as e:
+        print(f"salmon.gif not loaded: {e}")
+
+
+class Salmon:
+    """GIF-animated salmon that swims at medium speed."""
+
+    def __init__(self):
+        _ensure_salmon_frames()
+        self.x      = float(random.randint(120, SCREEN_WIDTH - 120))
+        self.y      = float(random.randint(WATER_Y + 50, SCREEN_HEIGHT - 60))
+        speed       = random.uniform(1.2, 1.9)
+        self.vx     = speed * random.choice([-1, 1])
+        self.vy     = random.uniform(-0.25, 0.25)
+        self.radius = 26   # collision radius (matches sprite size)
+        self.color  = (220, 100, 60)  # salmon orange (fallback for caught_fish drawing)
+        self.alive  = True
+        self.frame  = 0
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.frame += 1
+        if self.x < 80 or self.x > SCREEN_WIDTH - 80:
+            self.vx *= -1
+        if self.y < WATER_Y + 30 or self.y > SCREEN_HEIGHT - 50:
+            self.vy *= -1
+        self.x = max(80, min(SCREEN_WIDTH - 80, self.x))
+        self.y = max(WATER_Y + 30, min(SCREEN_HEIGHT - 50, self.y))
+
+    def draw(self, screen):
+        if not self.alive:
+            return
+        if not _salmon_frames:
+            # fallback: draw as a simple orange ellipse
+            cx, cy = int(self.x), int(self.y)
+            pygame.draw.ellipse(screen, (220, 100, 60), (cx - 26, cy - 13, 52, 26))
+            return
+        surf = _salmon_frames[(self.frame // 5) % len(_salmon_frames)]
+        # GIF faces left by default; flip when going right
+        if self.vx > 0:
+            surf = pygame.transform.flip(surf, True, False)
+        w, h = surf.get_size()
+        screen.blit(surf, (int(self.x) - w // 2, int(self.y) - h // 2))
+
+
+def _make_fish_pool(n=14):
+    """Return a mixed list of Fish and Salmon (roughly 1 salmon per 3 fish)."""
+    pool = []
+    for i in range(n):
+        if i % 3 == 0:
+            pool.append(Salmon())
+        else:
+            pool.append(Fish())
+    return pool
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  FISH CLASS
 # ═══════════════════════════════════════════════════════════════════════════
 class Fish:
@@ -470,7 +539,7 @@ class Game:
         self.active_bird = self.pelican
 
         # ── fish ─────────────────────────────────
-        self.fish_list = [Fish() for _ in range(14)]
+        self.fish_list = _make_fish_pool(14)
 
         # ── crabs ────────────────────────────────
         self.crab_list = [Crab() for _ in range(5)]
@@ -585,7 +654,7 @@ class Game:
                         self.stamina = self.max_stamina
                     elif self.btn_restart.collidepoint(mx, my):
                         self.caught_count = 0
-                        self.fish_list = [Fish() for _ in range(14)]
+                        self.fish_list = _make_fish_pool(14)
                         self._start_game()
                         self.stamina = self.max_stamina
                     elif self.btn_quit_game.collidepoint(mx, my):
