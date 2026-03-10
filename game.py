@@ -142,6 +142,58 @@ class Fish:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  CRAB CLASS
+# ═══════════════════════════════════════════════════════════════════════════
+SAND_Y = SCREEN_HEIGHT - 38   # y where crabs sit (on top of the sand strip)
+
+class Crab:
+    COLOR_SHELL = (210,  85,  25)
+    COLOR_BODY  = (240, 120,  40)
+
+    def __init__(self):
+        self.x     = float(random.randint(80, SCREEN_WIDTH - 80))
+        self.y     = float(SAND_Y)
+        self.vx    = random.choice([-1, 1]) * random.uniform(0.4, 1.1)
+        self.alive = True
+        self.frame = 0
+
+    def update(self):
+        self.frame += 1
+        self.x += self.vx
+        if self.x < 60 or self.x > SCREEN_WIDTH - 60:
+            self.vx *= -1
+        self.x = max(60, min(SCREEN_WIDTH - 60, self.x))
+
+    def draw(self, screen):
+        if not self.alive:
+            return
+        cx, cy = int(self.x), int(self.y)
+        leg_off = int(math.sin(self.frame * 0.22) * 4)
+        # legs (3 on each side)
+        for side in (-1, 1):
+            for i, (dx, dy) in enumerate([(10, -5), (16, 1), (10, 7)]):
+                x0, y0 = cx + side * 7, cy
+                x1 = cx + side * dx
+                y1 = cy + dy + (leg_off if i % 2 == 0 else -leg_off)
+                pygame.draw.line(screen, self.COLOR_SHELL, (x0, y0), (x1, y1), 2)
+        # shell body
+        pygame.draw.ellipse(screen, self.COLOR_SHELL, (cx - 16, cy - 9,  32, 18))
+        pygame.draw.ellipse(screen, self.COLOR_BODY,  (cx - 11, cy - 6,  22, 12))
+        # claws
+        for side in (-1, 1):
+            claw_x = cx + side * 21
+            claw_y = cy - 5
+            pygame.draw.circle(screen, self.COLOR_SHELL, (claw_x, claw_y), 7)
+            pygame.draw.circle(screen, self.COLOR_BODY,  (claw_x + side * 4, claw_y - 3), 4)
+        # eyes on stalks
+        for side in (-1, 1):
+            ex, ey = cx + side * 7, cy - 13
+            pygame.draw.line(screen, self.COLOR_SHELL, (cx + side * 5, cy - 9), (ex, ey), 2)
+            pygame.draw.circle(screen, (255, 255, 255), (ex, ey), 4)
+            pygame.draw.circle(screen, (0, 0, 0),       (ex, ey), 2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  BIRD CLASS
 # ═══════════════════════════════════════════════════════════════════════════
 class Bird:
@@ -420,6 +472,9 @@ class Game:
         # ── fish ─────────────────────────────────
         self.fish_list = [Fish() for _ in range(14)]
 
+        # ── crabs ────────────────────────────────
+        self.crab_list = [Crab() for _ in range(5)]
+
         # ── HUD ──────────────────────────────────
         self.caught_count = 0
         self.stamina      = 100.0
@@ -621,6 +676,11 @@ class Game:
             if fish.alive:
                 fish.update()
 
+        # ── update crabs ─────────────────────────
+        for crab in self.crab_list:
+            if crab.alive:
+                crab.update()
+
         # ── state machine ────────────────────────
         if self.state == GameState.DIVING:
             bird = self.active_bird
@@ -642,6 +702,21 @@ class Game:
                     self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
                     self.fish_list.append(Fish())
                     break  # at most one fish per frame
+
+            # ── crab collision (pelican only) ─────
+            if bird.bird_type == 'pelican':
+                for crab in self.crab_list:
+                    if not crab.alive:
+                        continue
+                    dist = math.hypot(bird.x - crab.x, bird.y - crab.y)
+                    if dist < bird.capture_radius + 16:
+                        crab.alive        = False
+                        self.caught_count += 2
+                        self.stamina = min(self.max_stamina, self.stamina + 12)
+                        self._add_floater(bird.x, bird.y - 30, "+2")
+                        self._add_message(f"Chris: Crab caught! x2 bonus! Total: {self.caught_count}")
+                        self.crab_list.append(Crab())
+                        break
 
             # surface when reaching max depth OR when the bird has nearly stopped sinking
             if bird.state == 'underwater' and (
@@ -705,6 +780,7 @@ class Game:
             self._draw_water()
 
         self._draw_fish()
+        self._draw_crabs()
         self._draw_birds()
         self._draw_floaters()
 
@@ -790,9 +866,26 @@ class Game:
             pygame.draw.polygon(ray_surf, (255, 255, 255, 16), rpts)
         self.screen.blit(ray_surf, (0, WATER_Y))
 
+        # sandy bottom
+        sand_strip_y = SCREEN_HEIGHT - 36
+        pygame.draw.rect(self.screen, (185, 162, 100),
+                         (0, sand_strip_y, SCREEN_WIDTH, 36))
+        pygame.draw.rect(self.screen, (210, 190, 130),
+                         (0, sand_strip_y, SCREEN_WIDTH, 7))
+        # pebbles
+        for i in range(0, SCREEN_WIDTH, 50):
+            pygame.draw.circle(self.screen, (155, 132, 80),
+                               (i + 22, sand_strip_y + 18), 4)
+            pygame.draw.circle(self.screen, (170, 148, 95),
+                               (i + 40, sand_strip_y + 26), 3)
+
     def _draw_fish(self):
         for fish in self.fish_list:
             fish.draw(self.screen)
+
+    def _draw_crabs(self):
+        for crab in self.crab_list:
+            crab.draw(self.screen)
 
     def _draw_birds(self):
         for bird in [self.pelican, self.osprey]:
