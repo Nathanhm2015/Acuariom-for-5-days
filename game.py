@@ -77,6 +77,7 @@ class GameState(Enum):
     RISING     = 5
     SETTINGS   = 6
     GAME_OVER  = 7
+    SHOP       = 8
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -137,14 +138,21 @@ class Salmon:
         screen.blit(surf, (int(self.x) - w // 2, int(self.y) - h // 2))
 
 
-def _make_fish_pool(n=14):
-    """Return a mixed list of Fish and Salmon (roughly 1 salmon per 3 fish)."""
+def _spawn_fish(luck=0):
+    """Spawn one fish; with luck>0 may return a GoldenFish."""
+    if luck > 0 and random.random() < luck * 0.20:
+        return GoldenFish()
+    return Fish()
+
+
+def _make_fish_pool(n=14, luck=0):
+    """Return a mixed list of Fish, Salmon, and possibly GoldenFish."""
     pool = []
     for i in range(n):
         if i % 3 == 0:
             pool.append(Salmon())
         else:
-            pool.append(Fish())
+            pool.append(_spawn_fish(luck))
     return pool
 
 
@@ -171,6 +179,8 @@ class Fish:
         self.color  = self.TYPES[self.fish_type]
         self.alive  = True
         self.frame  = 0
+        self.golden = False
+        self.value  = 1
 
     def update(self):
         self.x += self.vx
@@ -208,6 +218,58 @@ class Fish:
         ey = cy - r // 6
         pygame.draw.circle(screen, WHITE, (ex, ey), max(3, r // 4))
         pygame.draw.circle(screen, BLACK, (ex, ey), max(1, r // 7))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  GOLDEN FISH CLASS
+# ═══════════════════════════════════════════════════════════════════════════
+class GoldenFish(Fish):
+    """Rare golden fish worth 3 coins."""
+    def __init__(self, x=None, y=None):
+        super().__init__(x, y)
+        self.color  = (255, 215, 0)
+        self.golden = True
+        self.value  = 3
+        self.radius = max(self.radius, 20)
+        self.vx    *= 0.65
+        self.vy    *= 0.65
+
+    def draw(self, screen):
+        if not self.alive:
+            return
+        r   = self.radius
+        cx  = int(self.x)
+        cy  = int(self.y)
+        flip = self.vx >= 0
+        # glow aura
+        glow_r = r + 6 + int(math.sin(self.frame * 0.08) * 3)
+        glow_surf = pygame.Surface((glow_r * 2 + 4, glow_r * 2 + 4), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, (255, 215, 0, 55), (glow_r + 2, glow_r + 2), glow_r)
+        screen.blit(glow_surf, (cx - glow_r - 2, cy - glow_r - 2))
+        # body
+        pygame.draw.ellipse(screen, (200, 155, 0), (cx - r - 1, cy - r // 2 - 1, r * 2 + 2, r + 2))
+        pygame.draw.ellipse(screen, (255, 215, 0), (cx - r, cy - r // 2, r * 2, r))
+        wobble = math.sin(self.frame * 0.18) * 3
+        if flip:
+            pts = [(cx + r, cy - r//3 + wobble),
+                   (cx + r + r//2, cy + wobble * 1.4),
+                   (cx + r, cy + r//3 + wobble)]
+        else:
+            pts = [(cx - r, cy - r//3 + wobble),
+                   (cx - r - r//2, cy + wobble * 1.4),
+                   (cx - r, cy + r//3 + wobble)]
+        pygame.draw.polygon(screen, (255, 215, 0), [(int(a), int(b)) for a, b in pts])
+        ex = cx + (r // 3 if flip else -r // 3)
+        ey = cy - r // 6
+        pygame.draw.circle(screen, WHITE, (ex, ey), max(3, r // 4))
+        pygame.draw.circle(screen, BLACK, (ex, ey), max(1, r // 7))
+        # sparkles
+        for i in range(4):
+            ang = 2 * math.pi * i / 4 + self.frame * 0.05
+            sx  = cx + int(math.cos(ang) * (r + 11))
+            sy  = cy + int(math.sin(ang) * (r + 11))
+            sr  = max(1, int(2 + math.sin(self.frame * 0.12 + i) * 1.5))
+            pygame.draw.circle(screen, WHITE, (sx, sy), sr)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -539,7 +601,15 @@ class Game:
         self.active_bird = self.pelican
 
         # ── fish ─────────────────────────────────
-        self.fish_list = _make_fish_pool(14)
+        self.fish_list = _make_fish_pool(14, luck=0)
+
+        # ── upgrades / shop ──────────────────────
+        self.upgrades      = {'depth': 0, 'capacity': 0, 'luck': 0}
+        self.upgrade_costs = [5, 10, 20]   # cost to reach each level
+        self.max_upgrade   = 3
+        # shop button rects (positioned in _draw methods)
+        self.btn_close_shop = pygame.Rect(0, 0, 40, 40)
+        self.shop_btns      = [pygame.Rect(0, 0, 180, 50) for _ in range(3)]
 
         # ── crabs ────────────────────────────────
         self.crab_list = [Crab() for _ in range(5)]
@@ -570,6 +640,7 @@ class Game:
         self.btn_pelican        = pygame.Rect(18,  SCREEN_HEIGHT - 132, 110, 110)
         self.btn_osprey         = pygame.Rect(SCREEN_WIDTH - 128, SCREEN_HEIGHT - 132, 110, 110)
         self.btn_gear           = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)   # right gear
+        self.btn_shop           = pygame.Rect(SCREEN_WIDTH - 110, 10, 48, 48)  # shop button
         self.btn_gear_left      = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)  # right gear (settings)
         self.prev_state         = GameState.FLYING   # state to restore when closing settings
         self.btn_close_settings = pygame.Rect(SCREEN_WIDTH//2 + 210, SCREEN_HEIGHT//2 - 220, 40, 40)
@@ -617,14 +688,14 @@ class Game:
                 if ev.key in self.keys:
                     self.keys[ev.key] = True
 
-                # ESC closes settings or returns to start
+                # ESC closes settings/shop or returns to start
                 if ev.key == pygame.K_ESCAPE:
-                    if self.state == GameState.SETTINGS:
+                    if self.state in (GameState.SETTINGS, GameState.SHOP):
                         self.state = self.prev_state
                     else:
                         self.state = GameState.START
 
-                if self.state == GameState.SETTINGS:
+                if self.state in (GameState.SETTINGS, GameState.SHOP):
                     continue
 
                 if ev.key == pygame.K_SPACE:
@@ -654,7 +725,7 @@ class Game:
                         self.stamina = self.max_stamina
                     elif self.btn_restart.collidepoint(mx, my):
                         self.caught_count = 0
-                        self.fish_list = _make_fish_pool(14)
+                        self.fish_list = _make_fish_pool(14, luck=self.upgrades['luck'])
                         self._start_game()
                         self.stamina = self.max_stamina
                     elif self.btn_quit_game.collidepoint(mx, my):
@@ -668,6 +739,30 @@ class Game:
                         self.state = self.prev_state
                     return True
 
+                # ── SHOP screen ────────────────────────────
+                if self.state == GameState.SHOP:
+                    if self.btn_close_shop.collidepoint(mx, my):
+                        self.state = self.prev_state
+                        return True
+                    upgrade_keys = ['depth', 'capacity', 'luck']
+                    for i, btn in enumerate(self.shop_btns):
+                        if btn.collidepoint(mx, my):
+                            key   = upgrade_keys[i]
+                            level = self.upgrades[key]
+                            if level < self.max_upgrade:
+                                cost = self.upgrade_costs[level]
+                                if self.caught_count >= cost:
+                                    self.caught_count  -= cost
+                                    self.upgrades[key] += 1
+                                    self._apply_upgrades()
+                    return True
+
+                # ── shop button ─────────────────────────────
+                if self.btn_shop.collidepoint(mx, my):
+                    self.prev_state = self.state if self.state != GameState.START else GameState.FLYING
+                    self.state = GameState.SHOP
+                    return True
+
                 # ── left gear button → open settings ─────
                 if self.btn_gear_left.collidepoint(mx, my):
                     self.prev_state = self.state if self.state != GameState.START else GameState.FLYING
@@ -675,7 +770,7 @@ class Game:
                     return True
 
                 if self.state == GameState.START:
-                    if self.btn_play.collidepoint(mx, my):
+                    if self.btn_play.collidepoint(mx, my) or my < WATER_Y:
                         self._start_game()
                     return True
 
@@ -693,6 +788,16 @@ class Game:
 
         return True
 
+    def _apply_upgrades(self):
+        """Apply current upgrade levels to birds."""
+        base           = Bird.CONFIGS
+        depth_bonus    = self.upgrades['depth']    * 70
+        capacity_bonus = self.upgrades['capacity'] * 15
+        self.pelican.max_depth      = base['pelican']['max_depth']      + depth_bonus
+        self.pelican.capture_radius = base['pelican']['capture_radius'] + capacity_bonus
+        self.osprey.max_depth       = base['osprey']['max_depth']       + int(depth_bonus * 0.7)
+        self.osprey.capture_radius  = base['osprey']['capture_radius']  + capacity_bonus
+
     def _start_game(self):
         self.state             = GameState.FLYING
         self.pelican.x, self.pelican.y = 260, 260
@@ -701,6 +806,7 @@ class Game:
         self.osprey.state  = 'flying'
         self.pelican.vx = self.pelican.vy = 0
         self.osprey.vx  = self.osprey.vy  = 0
+        self._apply_upgrades()
         self._add_message("Martin: Use arrows to fly! A=pelican dive, D=osprey dive")
 
     def _dive(self, bird):
@@ -717,8 +823,8 @@ class Game:
     #  UPDATE
     # ═══════════════════════════════════════════
     def update(self):
-        if self.state in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER):
-            # clouds still move on menu/settings/game-over screens
+        if self.state in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER, GameState.SHOP):
+            # clouds still move on menu/settings/game-over/shop screens
             self._update_clouds()
             return
 
@@ -735,7 +841,7 @@ class Game:
         self.osprey.update()
 
         # ── stamina drains passively (20 s without a catch = empty) ──
-        if self.state not in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER):
+        if self.state not in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER, GameState.SHOP):
             self.stamina = max(0.0, self.stamina - self._stamina_drain)
             if self.stamina <= 0 and self.state != GameState.GAME_OVER:
                 self.state = GameState.GAME_OVER
@@ -765,11 +871,12 @@ class Game:
                 if dist < bird.capture_radius + fish.radius:
                     fish.alive        = False
                     bird.caught_fish  = fish
-                    self.caught_count += 1
+                    self.caught_count += fish.value
                     self.stamina = min(self.max_stamina, self.stamina + 12)
-                    self._add_floater(bird.x, bird.y - 30)
-                    self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
-                    self.fish_list.append(Fish())
+                    lbl = f"+{fish.value}" + (" DORADO!" if fish.golden else "")
+                    self._add_floater(bird.x, bird.y - 30, lbl)
+                    self._add_message(f"Chris: {'Pez dorado x3!' if fish.golden else 'Buen pescado!'} Total: {self.caught_count}")
+                    self.fish_list.append(_spawn_fish(self.upgrades['luck']))
                     # pelican: keep going; osprey: also keep catching (no early break)
 
             # ── crab collision (pelican only) ─────
@@ -805,11 +912,12 @@ class Game:
                 if dist < bird.capture_radius + fish.radius:
                     fish.alive        = False
                     bird.caught_fish  = fish
-                    self.caught_count += 1
+                    self.caught_count += fish.value
                     self.stamina = min(self.max_stamina, self.stamina + 12)
-                    self._add_floater(bird.x, bird.y - 30)
-                    self._add_message(f"Chris: Great catch! Fish: {self.caught_count}")
-                    self.fish_list.append(Fish())
+                    lbl = f"+{fish.value}" + (" DORADO!" if fish.golden else "")
+                    self._add_floater(bird.x, bird.y - 30, lbl)
+                    self._add_message(f"Chris: {'Pez dorado x3!' if fish.golden else 'Buen pescado!'} Total: {self.caught_count}")
+                    self.fish_list.append(_spawn_fish(self.upgrades['luck']))
             if bird.state == 'flying':
                 bird.caught_fish = None
                 self.state       = GameState.FLYING
@@ -843,7 +951,7 @@ class Game:
     # ═══════════════════════════════════════════
     def draw(self):
         self._draw_background()
-        if self.state not in (GameState.START, GameState.SETTINGS):
+        if self.state not in (GameState.START, GameState.SETTINGS, GameState.SHOP):
             self._draw_water()
 
         self._draw_fish()
@@ -856,6 +964,9 @@ class Game:
         elif self.state == GameState.SETTINGS:
             self._draw_hud()
             self._draw_settings_panel()
+        elif self.state == GameState.SHOP:
+            self._draw_hud()
+            self._draw_shop_panel()
         elif self.state == GameState.GAME_OVER:
             self._draw_game_over()
         else:
@@ -974,10 +1085,12 @@ class Game:
         band.fill((0, 0, 0, 155))
         self.screen.blit(band, (0, 0))
 
-        # ── fish icon + counter ──────────────────
+        # ── fish icon + counter + "monedas" label ─
         self._icon_fish(46, 38)
         txt = self.font.render(str(self.caught_count), True, WHITE)
         self.screen.blit(txt, (75, 22))
+        coin_lbl = self.font_sm.render("monedas", True, (255, 220, 80))
+        self.screen.blit(coin_lbl, (75, 46))
 
         # ── lightning + stamina bar ──────────────
         self._icon_lightning(148, 25, 30)
@@ -988,6 +1101,9 @@ class Game:
             pygame.draw.rect(self.screen, ORANGE,
                              (bx, by, fill, bh), border_radius=6)
         pygame.draw.rect(self.screen, (180, 80, 20), (bx, by, bw, bh), 2, border_radius=6)
+
+        # ── shop button ───────────────────────────
+        self._icon_shop(self.btn_shop.centerx, self.btn_shop.centery, 16)
 
         # ── right gear icon (settings) ───────────
         self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 16)
@@ -1057,6 +1173,14 @@ class Game:
             y3 = cy + int(math.sin(a + 0.44) * (r + 4))
             pygame.draw.polygon(self.screen, RED, [(x1,y1),(x2,y2),(x3,y3)])
         pygame.draw.circle(self.screen, (55, 15, 15), (cx, cy), r // 2)
+
+    def _icon_shop(self, cx, cy, r):
+        """Draw a gold coin shop button."""
+        pygame.draw.circle(self.screen, (180, 130, 10), (cx, cy), r + 8)
+        pygame.draw.circle(self.screen, (255, 215, 0),  (cx, cy), r + 8, 3)
+        pygame.draw.circle(self.screen, (255, 235, 80), (cx, cy), r)
+        s = self.font_sm.render("$", True, (100, 60, 0))
+        self.screen.blit(s, (cx - s.get_width()//2, cy - s.get_height()//2))
 
     def _bird_button(self, rect, bird, active, key):
         border_color = BTN_GREEN if bird.bird_type == 'pelican' else HUD_BLUE
@@ -1132,9 +1256,9 @@ class Game:
 
         # instructions
         for i, line in enumerate([
-            "Arrow keys: fly the active bird",
-            "A: Pelican dives  |  D: Osprey dives",
-            "Space / Click: active bird dives",
+            "Toca el cielo para empezar  |  PLAY para comenzar",
+            "A: Pelicano se zambulle  |  D: Ave pescadora se zambulle",
+            "Flechas: mover el ave activa  |  Espacio: zambullirse",
         ]):
             s = self.font_sm.render(line, True, (195, 230, 255))
             self.screen.blit(s, (80, 318 + i * 28))
@@ -1146,7 +1270,8 @@ class Game:
         self.screen.blit(pt, (self.btn_play.centerx - pt.get_width()//2,
                                self.btn_play.centery - pt.get_height()//2))
 
-        # gear icon (settings)
+        # shop + gear icons
+        self._icon_shop(self.btn_shop.centerx, self.btn_shop.centery, 16)
         self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 16)
 
         # bird preview
@@ -1244,6 +1369,91 @@ class Game:
         # ── footer ───────────────────────────────
         footer = line_font.render("Press ESC or click X to close", True, (150, 160, 180))
         self.screen.blit(footer, (px + pw//2 - footer.get_width()//2, py + ph - 28))
+
+    # ═══════════════════════════════════════════
+    #  SHOP PANEL
+    # ═══════════════════════════════════════════
+    def _draw_shop_panel(self):
+        pw, ph = 500, 460
+        px = SCREEN_WIDTH  // 2 - pw // 2
+        py = SCREEN_HEIGHT // 2 - ph // 2
+
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        panel.fill((20, 40, 15, 240))
+        self.screen.blit(panel, (px, py))
+        pygame.draw.rect(self.screen, (255, 215, 0), (px, py, pw, ph), 3, border_radius=16)
+
+        # title bar
+        pygame.draw.rect(self.screen, (60, 100, 20), (px, py, pw, 56), border_radius=16)
+        title_surf = self.font_title.render("TIENDA DE MEJORAS", True, (255, 235, 80))
+        self.screen.blit(title_surf, (px + pw//2 - title_surf.get_width()//2, py + 10))
+        self._icon_shop(px + 32, py + 28, 12)
+
+        # coins display
+        coins_txt = self.font.render(f"Monedas: {self.caught_count}", True, (255, 215, 0))
+        self.screen.blit(coins_txt, (px + pw - coins_txt.get_width() - 20, py + 66))
+
+        # close button
+        self.btn_close_shop.topleft = (px + pw - 46, py + 8)
+        pygame.draw.rect(self.screen, (180, 50, 50), self.btn_close_shop, border_radius=8)
+        pygame.draw.rect(self.screen, (230, 90, 90), self.btn_close_shop, 2, border_radius=8)
+        x_txt = self.font.render("X", True, WHITE)
+        self.screen.blit(x_txt, (self.btn_close_shop.centerx - x_txt.get_width()//2,
+                                  self.btn_close_shop.centery - x_txt.get_height()//2))
+
+        upgrade_defs = [
+            ('depth',    'Bucear mas hondo',      'Cada nivel: +70px profundidad', (80, 160, 230)),
+            ('capacity', 'Red mas grande',         'Cada nivel: +15px de alcance',  (80, 210, 120)),
+            ('luck',     'Suerte pez dorado',      'Cada nivel: +20% pez dorado (+3 monedas)', (255, 200, 0)),
+        ]
+
+        lf = pygame.font.Font(None, 24)
+        sf = pygame.font.Font(None, 20)
+        iy = py + 106
+        for i, (key, name, desc, color) in enumerate(upgrade_defs):
+            level = self.upgrades[key]
+            card_rect = pygame.Rect(px + 16, iy, pw - 32, 96)
+            pygame.draw.rect(self.screen, (30, 55, 22), card_rect, border_radius=10)
+            pygame.draw.rect(self.screen, color, card_rect, 2, border_radius=10)
+
+            # name + level dots
+            n_surf = lf.render(name, True, WHITE)
+            self.screen.blit(n_surf, (card_rect.x + 14, iy + 10))
+            for d in range(self.max_upgrade):
+                dot_color = color if d < level else (60, 60, 60)
+                pygame.draw.circle(self.screen, dot_color,
+                                   (card_rect.x + 14 + d * 20, iy + 36), 8)
+                pygame.draw.circle(self.screen, WHITE,
+                                   (card_rect.x + 14 + d * 20, iy + 36), 8, 1)
+
+            d_surf = sf.render(desc, True, (180, 210, 180))
+            self.screen.blit(d_surf, (card_rect.x + 14, iy + 54))
+
+            # BUY button
+            btn = self.shop_btns[i]
+            btn.topleft = (card_rect.right - 184, iy + 24)
+            if level >= self.max_upgrade:
+                pygame.draw.rect(self.screen, (50, 50, 50), btn, border_radius=10)
+                lbl = lf.render("MAX", True, (150, 150, 150))
+            else:
+                cost = self.upgrade_costs[level]
+                can_afford = self.caught_count >= cost
+                btn_color  = (40, 130, 55) if can_afford else (80, 50, 50)
+                pygame.draw.rect(self.screen, btn_color, btn, border_radius=10)
+                pygame.draw.rect(self.screen, color, btn, 2, border_radius=10)
+                lbl = lf.render(f"Comprar  -{cost} monedas", True,
+                                WHITE if can_afford else (160, 100, 100))
+            self.screen.blit(lbl, (btn.centerx - lbl.get_width()//2,
+                                    btn.centery - lbl.get_height()//2))
+
+            iy += 112
+
+        hint = sf.render("ESC o X para cerrar", True, (140, 150, 130))
+        self.screen.blit(hint, (px + pw//2 - hint.get_width()//2, py + ph - 26))
 
     # ═══════════════════════════════════════════
     #  GAME OVER SCREEN
