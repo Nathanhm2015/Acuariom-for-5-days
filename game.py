@@ -570,7 +570,7 @@ class Game:
         self.btn_pelican        = pygame.Rect(18,  SCREEN_HEIGHT - 132, 110, 110)
         self.btn_osprey         = pygame.Rect(SCREEN_WIDTH - 128, SCREEN_HEIGHT - 132, 110, 110)
         self.btn_gear           = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)   # right gear
-        self.btn_gear_left      = pygame.Rect(10, 10, 48, 48)                  # left gear (settings)
+        self.btn_gear_left      = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)  # right gear (settings)
         self.prev_state         = GameState.FLYING   # state to restore when closing settings
         self.btn_close_settings = pygame.Rect(SCREEN_WIDTH//2 + 210, SCREEN_HEIGHT//2 - 220, 40, 40)
 
@@ -989,9 +989,7 @@ class Game:
                              (bx, by, fill, bh), border_radius=6)
         pygame.draw.rect(self.screen, (180, 80, 20), (bx, by, bw, bh), 2, border_radius=6)
 
-        # ── right gear icon ──────────────────────
-        self._icon_gear(SCREEN_WIDTH - 34, 34, 22)
-        # ── left gear icon (settings) ─────────────
+        # ── right gear icon (settings) ───────────
         self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 16)
 
         # ── guide message ────────────────────────
@@ -1148,8 +1146,7 @@ class Game:
         self.screen.blit(pt, (self.btn_play.centerx - pt.get_width()//2,
                                self.btn_play.centery - pt.get_height()//2))
 
-        # gear icons
-        self._icon_gear(SCREEN_WIDTH - 34, 34, 22)
+        # gear icon (settings)
         self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 16)
 
         # bird preview
