@@ -78,6 +78,7 @@ class GameState(Enum):
     SETTINGS   = 6
     GAME_OVER  = 7
     SHOP       = 8
+    ITEM_STORE = 9
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1167,6 +1168,9 @@ class Game:
         self.btn_osprey         = pygame.Rect(SCREEN_WIDTH - 128, SCREEN_HEIGHT - 132, 110, 110)
         self.btn_gear           = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)   # right gear
         self.btn_shop           = pygame.Rect(SCREEN_WIDTH - 110, 10, 48, 48)  # shop button
+        self.btn_item_store     = pygame.Rect(SCREEN_WIDTH - 162, 10, 48, 48)  # tienda consumibles
+        self.item_store_btns    = [pygame.Rect(0, 0, 160, 44) for _ in range(4)]
+        self.btn_close_item_store = pygame.Rect(0, 0, 40, 40)
         self.btn_gear_left      = pygame.Rect(SCREEN_WIDTH - 58, 10, 48, 48)  # right gear (settings)
         self.prev_state         = GameState.FLYING   # state to restore when closing settings
         self.btn_close_settings = pygame.Rect(SCREEN_WIDTH//2 + 210, SCREEN_HEIGHT//2 - 220, 40, 40)
@@ -1214,14 +1218,14 @@ class Game:
                 if ev.key in self.keys:
                     self.keys[ev.key] = True
 
-                # ESC closes settings/shop or returns to start
+                # ESC closes settings/shop/item_store or returns to start
                 if ev.key == pygame.K_ESCAPE:
-                    if self.state in (GameState.SETTINGS, GameState.SHOP):
+                    if self.state in (GameState.SETTINGS, GameState.SHOP, GameState.ITEM_STORE):
                         self.state = self.prev_state
                     else:
                         self.state = GameState.START
 
-                if self.state in (GameState.SETTINGS, GameState.SHOP):
+                if self.state in (GameState.SETTINGS, GameState.SHOP, GameState.ITEM_STORE):
                     continue
 
                 if ev.key == pygame.K_SPACE:
@@ -1305,6 +1309,38 @@ class Game:
                                     self._apply_upgrades()
                     if self.btn_rebirth.collidepoint(mx, my) and self._can_rebirth():
                         self._do_rebirth()
+                    return True
+
+                # ── ITEM STORE screen ──────────────────────
+                if self.state == GameState.ITEM_STORE:
+                    if self.btn_close_item_store.collidepoint(mx, my):
+                        self.state = self.prev_state
+                        return True
+                    _items = [
+                        ('pelican_hp', 15),
+                        ('osprey_hp',  10),
+                        ('stamina',    20),
+                        ('ammo',        5),
+                    ]
+                    for i, btn in enumerate(self.item_store_btns):
+                        if btn.collidepoint(mx, my):
+                            key, cost = _items[i]
+                            if self.caught_count >= cost:
+                                self.caught_count -= cost
+                                if key == 'pelican_hp':
+                                    self.pelican.hp = self.pelican.max_hp
+                                elif key == 'osprey_hp':
+                                    self.osprey.hp = self.osprey.max_hp
+                                elif key == 'stamina':
+                                    self.stamina = self.max_stamina
+                                elif key == 'ammo':
+                                    self.active_bird.ammo += 10
+                    return True
+
+                # ── item store button ────────────────────────
+                if self.btn_item_store.collidepoint(mx, my):
+                    self.prev_state = self.state if self.state != GameState.START else GameState.FLYING
+                    self.state = GameState.ITEM_STORE
                     return True
 
                 # ── shop button ─────────────────────────────
@@ -1638,7 +1674,7 @@ class Game:
     #  UPDATE
     # ═══════════════════════════════════════════
     def update(self):
-        if self.state in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER, GameState.SHOP):
+        if self.state in (GameState.START, GameState.SETTINGS, GameState.GAME_OVER, GameState.SHOP, GameState.ITEM_STORE):
             # clouds still move on menu/settings/game-over/shop screens
             self._update_clouds()
             return
@@ -2098,6 +2134,9 @@ class Game:
         elif self.state == GameState.SHOP:
             self._draw_hud()
             self._draw_shop_panel()
+        elif self.state == GameState.ITEM_STORE:
+            self._draw_hud()
+            self._draw_item_store_panel()
         elif self.state == GameState.GAME_OVER:
             self._draw_game_over()
         else:
@@ -2299,6 +2338,13 @@ class Game:
         pygame.draw.rect(self.screen, (80, 160, 90), (pb_x, pb_y, pb_w, pb_h), 1, border_radius=3)
         lbl_prog = self.font_sm.render(f"{self.fish_this_wave}/{self.wave_target}", True, (160, 255, 160))
         self.screen.blit(lbl_prog, (pb_x + pb_w + 6, lev_y))
+
+        # ── item store button ─────────────────────
+        pygame.draw.rect(self.screen, (180, 50, 50), self.btn_item_store, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 130, 130), self.btn_item_store, 2, border_radius=10)
+        _tl = self.font_sm.render("TIENDA", True, (255, 255, 255))
+        self.screen.blit(_tl, (self.btn_item_store.centerx - _tl.get_width()//2,
+                                self.btn_item_store.centery - _tl.get_height()//2))
 
         # ── shop button ───────────────────────────
         self._icon_shop(self.btn_shop.centerx, self.btn_shop.centery, 16)
@@ -2523,7 +2569,12 @@ class Game:
         self.screen.blit(pt, (self.btn_play.centerx - pt.get_width()//2,
                                self.btn_play.centery - pt.get_height()//2))
 
-        # shop + gear icons
+        # shop + gear icons + item store
+        pygame.draw.rect(self.screen, (180, 50, 50), self.btn_item_store, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 130, 130), self.btn_item_store, 2, border_radius=10)
+        _tl2 = self.font_sm.render("TIENDA", True, (255, 255, 255))
+        self.screen.blit(_tl2, (self.btn_item_store.centerx - _tl2.get_width()//2,
+                                 self.btn_item_store.centery - _tl2.get_height()//2))
         self._icon_shop(self.btn_shop.centerx, self.btn_shop.centery, 16)
         self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 16)
 
