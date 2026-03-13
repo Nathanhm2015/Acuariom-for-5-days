@@ -448,7 +448,7 @@ class Bird:
         self.caught_fish    = None
         self.facing_right   = True
         # HP & combat
-        self.max_hp         = 5 if bird_type == 'pelican' else 3
+        self.max_hp         = 20 if bird_type == 'pelican' else 12
         self.hp             = self.max_hp
         self.hit_flash      = 0   # red-flash countdown when hit
         self.ammo           = 3
@@ -457,8 +457,19 @@ class Bird:
         self.special_cooldown  = 0   # frames until special can be used again
         self.burst_queue       = 0   # pelican: bullets still queued to fire this burst
         self.burst_interval    = 0   # frames until next burst bullet fires
-        self.peck_dash         = False  # osprey: actively dashing toward boss
+        self.peck_cooldown     = 0      # osprey: cooldown for right-click peck (frames)
+        self.peck_dash         = False  # osprey: actively dashing
+        self.peck_phase        = 'off'  # 'off' | 'going' | 'returning'
+        self._peck_rx          = 0.0    # return-to X
+        self._peck_ry          = 0.0    # return-to Y
         self.peck_trail        = []     # osprey: trail positions for visual effect
+        self.drill_dash        = False  # osprey: E taladro spin-dive active
+        self.drill_phase       = 'off'  # 'off' | 'going' | 'returning'
+        self._drill_rx         = 0.0
+        self._drill_ry         = 0.0
+        self.drill_angle       = 0.0    # osprey: spin angle for drill visual (degrees)
+        self._peck_hit_ids     = set()  # enemies already hit during this peck
+        self._drill_hit_ids    = set()  # enemies already hit during this drill
         # Visual colors
         pal = self._COLORS[bird_type]
         self.body_color = pal['body']
@@ -521,15 +532,25 @@ class Bird:
                 self.peck_trail.pop(0)
         else:
             self.peck_trail = []
+        # peck cooldown + drill spin angle
+        if self.peck_cooldown > 0:
+            self.peck_cooldown -= 1
+        if self.drill_dash:
+            self.drill_angle = (self.drill_angle + 22.0) % 360.0
 
         if self.state == 'flying':
-            self.x += self.vx
-            self.y += self.vy
-            # soft gravity
-            if self.vy < 0.5:
-                self.vy += 0.06
-            self.x = max(30, min(SCREEN_WIDTH - 30, self.x))
-            self.y = max(30, min(WATER_Y - 15, self.y))
+            if self.peck_dash or self.drill_dash:
+                # position controlled entirely by peck/drill blocks in Game.update
+                self.vx = 0.0
+                self.vy = 0.0
+            else:
+                self.x += self.vx
+                self.y += self.vy
+                # soft gravity
+                if self.vy < 0.5:
+                    self.vy += 0.06
+                self.x = max(30, min(SCREEN_WIDTH - 30, self.x))
+                self.y = max(30, min(WATER_Y - 15, self.y))
 
         elif self.state == 'diving':
             self.x += self.vx
@@ -1084,12 +1105,13 @@ class Game:
         self.fish_list = _make_fish_pool(14, luck=0)
 
         # ── upgrades / shop ──────────────────────
-        self.upgrades       = {'depth': 0, 'capacity': 0, 'luck': 0}
+        self.upgrades       = {'depth': 0, 'capacity': 0, 'luck': 0, 'damage': 0}
         self.upgrade_costs  = [5, 10, 20, 35, 55]   # one cost per level (5 max levels)
         self.max_upgrade    = 3                      # unlocked to 5 after rebirth
+        self.bullet_damage  = 1                      # updated by _apply_upgrades
         # shop button rects (positioned in _draw methods)
         self.btn_close_shop = pygame.Rect(0, 0, 40, 40)
-        self.shop_btns      = [pygame.Rect(0, 0, 180, 50) for _ in range(3)]
+        self.shop_btns      = [pygame.Rect(0, 0, 180, 50) for _ in range(4)]
         self.btn_rebirth    = pygame.Rect(0, 0, 1, 1)
 
         # ── rebirth / lifetime stats ──────────────────
@@ -1219,16 +1241,27 @@ class Game:
                     self._pelican_burst()
 
                 if ev.key == pygame.K_e:
-                    self._osprey_peck()
+                    self._osprey_drill()
+
+                if ev.key == pygame.K_1:
+                    self.active_bird = self.pelican
+                    self._add_message("Pelícano seleccionado")
+
+                if ev.key == pygame.K_2:
+                    self.active_bird = self.osprey
+                    self._add_message("Ave pescadora seleccionada")
 
             if ev.type == pygame.KEYUP:
                 if ev.key in self.keys:
                     self.keys[ev.key] = False
 
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
-                # Right-click → shoot
+                # Right-click → pelican shoots fish bullets, osprey does peck dive
                 if self.state == GameState.FLYING:
-                    self._shoot(self.active_bird)
+                    if self.active_bird is self.pelican:
+                        self._shoot(self.pelican)
+                    else:
+                        self._osprey_peck()
 
             if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mx, my = pygame.mouse.get_pos()
@@ -1259,7 +1292,7 @@ class Game:
                     if self.btn_close_shop.collidepoint(mx, my):
                         self.state = self.prev_state
                         return True
-                    upgrade_keys = ['depth', 'capacity', 'luck']
+                    upgrade_keys = ['depth', 'capacity', 'luck', 'damage']
                     for i, btn in enumerate(self.shop_btns):
                         if btn.collidepoint(mx, my):
                             key   = upgrade_keys[i]
@@ -1314,7 +1347,7 @@ class Game:
         self.caught_count       -= 50
         self.rebirth_count      += 1
         self.max_upgrade         = 5
-        self.upgrades            = {'depth': 0, 'capacity': 0, 'luck': 0}
+        self.upgrades            = {'depth': 0, 'capacity': 0, 'luck': 0, 'damage': 0}
         self.fish_list           = _make_fish_pool(14, luck=0)
         # drain gets 2 s faster each rebirth (harder difficulty)
         drain_time = max(8, 20 - self.rebirth_count * 2)
@@ -1364,18 +1397,18 @@ class Game:
         pool_size = min(14 + (self.wave - 1) * 2, 26)
         self.fish_list = _make_fish_pool(pool_size, luck=self.upgrades['luck'])
         # Speed up fish proportional to wave
-        speed_factor = 1.0 + (self.wave - 1) * 0.10
+        speed_factor = 1.0 + (self.wave - 1) * 0.05
         for fish in self.fish_list:
             fish.vx *= speed_factor
             fish.vy *= speed_factor
         # Add more puffers with more HP (keep alive ones from previous wave)
-        puffer_hp = 1 + (self.wave - 1) // 2
-        n_new = 1 + (self.wave - 1) // 3
+        puffer_hp = 1 + (self.wave - 1) // 4
+        n_new = 1 + (self.wave - 1) // 5
         self.puffer_list = [pf for pf in self.puffer_list if pf.alive]
         for _ in range(n_new):
             self.puffer_list.append(PufferFish(hp=puffer_hp))
         # Stamina drains faster each wave
-        self._stamina_drain *= 1.08
+        self._stamina_drain *= 1.03
         # Partial stamina reward for clearing the wave
         self.stamina = min(self.max_stamina, self.stamina + 30)
         self._add_message(f"\u2605 \u00a1OLEADA {self.wave}! \u00bfPodr\u00e1s sobrevivir? \u2605")
@@ -1389,6 +1422,14 @@ class Game:
         self.pelican.capture_radius = base['pelican']['capture_radius'] + capacity_bonus
         self.osprey.max_depth       = base['osprey']['max_depth']       + int(depth_bonus * 0.7)
         self.osprey.capture_radius  = base['osprey']['capture_radius']  + capacity_bonus
+        # damage: level 0=1, 1=4, 2=7, 3(max)=999 one-shot
+        dmg_level = self.upgrades['damage']
+        if dmg_level >= self.max_upgrade and self.max_upgrade <= 3:
+            self.bullet_damage = 999   # one-shot at max
+        elif dmg_level >= 5:
+            self.bullet_damage = 999   # one-shot at rebirth max too
+        else:
+            self.bullet_damage = 1 + dmg_level * 3
 
     def _start_game(self, reset_wave=False):
         self.state             = GameState.FLYING
@@ -1410,16 +1451,20 @@ class Game:
             self.boss        = SharkBoss()
             self.boss.sting_cooldown = 120   # grace period at wave start
             self.wave_target = 1
+            self.stamina          = self.max_stamina
+            self._stamina_drain   = 100.0 / (60 * FPS)   # 1 minuto durante el jefe
         elif self.wave == 25:
             self.puffer_list = []
             self.fish_list   = []
             self.boss        = OctopusBoss()
             self.boss.sting_cooldown = 120
             self.wave_target = 1
+            self.stamina          = self.max_stamina
+            self._stamina_drain   = 100.0 / (60 * FPS)   # 1 minuto durante el jefe
         else:
-            puffer_hp = 1 + (self.wave - 1) // 2
+            puffer_hp = 1 + (self.wave - 1) // 4
             self.puffer_list = [PufferFish(hp=puffer_hp)
-                                for _ in range(self.rebirth_count + max(0, self.wave - 1))]
+                                for _ in range(max(0, self.wave - 1) // 2)]
             self.boss = None
         self._apply_upgrades()
         # reset bird HP and ammo each new game
@@ -1431,8 +1476,15 @@ class Game:
             bird.special_cooldown = 0
             bird.burst_queue     = 0
             bird.burst_interval  = 0
+            bird.peck_cooldown   = 0
             bird.peck_dash       = False
             bird.peck_trail      = []
+            bird.peck_phase      = 'off'
+            bird.drill_dash      = False
+            bird.drill_phase     = 'off'
+            bird.drill_angle     = 0.0
+            bird._peck_hit_ids   = set()
+            bird._drill_hit_ids  = set()
         self.bullets             = []
         self.bullet_pickups      = []
         self._pickup_spawn_timer = 300
@@ -1474,15 +1526,8 @@ class Game:
         if bird.ammo < 4:
             self._add_message("¡El pelícano necesita al menos 4 balas para la ráfaga!")
             return
-        # Aim toward boss if present, else toward nearest puffer
-        if self.boss is not None and self.boss.alive:
-            tx, ty = self.boss.x, self.boss.y
-        elif self.puffer_list:
-            nearest = min(self.puffer_list, key=lambda p: math.hypot(p.x - bird.x, p.y - bird.y))
-            tx, ty = nearest.x, nearest.y
-        else:
-            # No target — fire toward mouse cursor
-            tx, ty = pygame.mouse.get_pos()
+        # Always aim toward the mouse cursor
+        tx, ty = pygame.mouse.get_pos()
         dx = tx - bird.x
         dy = ty - bird.y
         dist = math.hypot(dx, dy)
@@ -1518,32 +1563,66 @@ class Game:
         bird = self.osprey
         if self.state != GameState.FLYING:
             return
-        if bird.special_cooldown > 0:
-            secs = bird.special_cooldown // 60 + 1
+        if bird.peck_cooldown > 0:
+            secs = bird.peck_cooldown // 60 + 1
             self._add_message(f"¡Picotazo recargando! ({secs}s)")
             return
-        # Aim toward boss if present, else nearest puffer
-        if self.boss is not None and self.boss.alive:
-            tx, ty = self.boss.x, self.boss.y
-        elif self.puffer_list:
-            nearest = min(self.puffer_list, key=lambda p: math.hypot(p.x - bird.x, p.y - bird.y))
-            tx, ty = nearest.x, nearest.y
-        else:
-            self._add_message("¡No hay objetivo para el picotazo!")
-            return
+        # aim at mouse cursor
+        tx, ty = pygame.mouse.get_pos()
+        tx, ty = float(tx), float(ty)
         dx = tx - bird.x
         dy = ty - bird.y
         dist = math.hypot(dx, dy)
-        if dist < 1: return
-        bird._peck_tx   = tx
-        bird._peck_ty   = ty
-        bird._peck_vx   = dx / dist * 28.0
-        bird._peck_vy   = dy / dist * 28.0
-        bird.peck_dash  = True
-        bird.special_cooldown = 300     # 5-second cooldown
+        if dist < 1:
+            return
+        bird._peck_rx      = bird.x
+        bird._peck_ry      = bird.y
+        bird._peck_tx      = tx
+        bird._peck_ty      = ty
+        bird._peck_vx      = dx / dist * 30.0
+        bird._peck_vy      = dy / dist * 30.0
+        bird._peck_target  = None
+        bird._peck_hit_ids = set()
+        bird.peck_dash     = True
+        bird.peck_phase    = 'going'
+        bird.peck_cooldown = 180        # 3-second cooldown
         bird.facing_right = tx >= bird.x
         self.active_bird = bird
         self._add_message("¡PICOTAZO DEL PESCADOR! ¡Golpe relámpago!")
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  OSPREY SPECIAL  [E] – taladro (drill spin-dive, AOE attack)
+    # ─────────────────────────────────────────────────────────────────────
+    def _osprey_drill(self):
+        bird = self.osprey
+        if self.state != GameState.FLYING:
+            return
+        if bird.special_cooldown > 0:
+            secs = bird.special_cooldown // 60 + 1
+            self._add_message(f"¡Taladro recargando! ({secs}s)")
+            return
+        # aim at mouse cursor
+        tx, ty = pygame.mouse.get_pos()
+        tx, ty = float(tx), float(ty)
+        dx = tx - bird.x
+        dy = ty - bird.y
+        dist = math.hypot(dx, dy)
+        if dist < 1:
+            return
+        bird._drill_rx    = bird.x
+        bird._drill_ry    = bird.y
+        bird._drill_tx    = tx
+        bird._drill_ty    = ty
+        bird._drill_vx    = dx / dist * 14.0
+        bird._drill_vy    = dy / dist * 14.0
+        bird._drill_hit_ids = set()
+        bird.drill_dash   = True
+        bird.drill_phase  = 'going'
+        bird.drill_angle  = 0.0
+        bird.special_cooldown = 420    # 7-second cooldown
+        bird.facing_right = tx >= bird.x
+        self.active_bird  = bird
+        self._add_message("¡TALADRO RELÁMPAGO! ¡Clavado de torbellino!")
 
     def _dive(self, bird):
         if self.state != GameState.FLYING:
@@ -1706,59 +1785,170 @@ class Game:
         # ── osprey peck dash ──────────────────────
         bird_osp = self.osprey
         if bird_osp.peck_dash:
-            bird_osp.x += bird_osp._peck_vx
-            bird_osp.y += bird_osp._peck_vy
-            # clamp to screen sky area
-            bird_osp.x = max(30.0, min(float(SCREEN_WIDTH - 30), bird_osp.x))
-            bird_osp.y = max(20.0, min(float(WATER_Y + 40), bird_osp.y))
-            # check boss hit
-            if self.boss is not None and self.boss.alive:
-                dist = math.hypot(bird_osp.x - self.boss.x, bird_osp.y - self.boss.y)
-                if dist < self.boss.radius + 22:
-                    dmg = 6
-                    self.boss.hp       -= dmg
-                    self.boss.hit_flash = 35
-                    bird_osp.peck_dash  = False
-                    bird_osp.vx, bird_osp.vy = -bird_osp._peck_vx * 0.6, -bird_osp._peck_vy * 0.6
-                    if self.boss.hp <= 0:
-                        self.boss.alive = False
-                        reward = 50 if isinstance(self.boss, OctopusBoss) else 25
-                        self.caught_count += reward
-                        boss_name = "PULPO" if isinstance(self.boss, OctopusBoss) else "TIBUR\u00d3N"
-                        self._add_floater(int(self.boss.x), int(self.boss.y) - 60,
-                                          f"+{reward} \u00a1JEFE DERROTADO!")
-                        self._add_message(
-                            f"\u2605 \u00a1{boss_name} DERROTADO por el picotazo! +{reward} monedas!")
-                        self.wave_clear_timer = 210
-                    else:
-                        self._add_floater(int(self.boss.x), int(self.boss.y) - 40,
-                                          f"\u00a1PICOTAZO! -{dmg}\u2665")
-            else:
-                # no boss: hit nearest puffer within range
-                for pf in self.puffer_list:
-                    if not pf.alive:
-                        continue
-                    dist = math.hypot(bird_osp.x - pf.x, bird_osp.y - pf.y)
-                    if dist < pf.radius + 22:
-                        dmg = 3
-                        pf.hp        -= dmg
-                        pf.hit_flash  = 25
-                        bird_osp.peck_dash = False
-                        bird_osp.vx, bird_osp.vy = -bird_osp._peck_vx * 0.6, -bird_osp._peck_vy * 0.6
-                        if pf.hp <= 0:
-                            pf.alive = False
-                            self.caught_count += 2
-                            self._add_floater(int(pf.x), int(pf.y) - 30, "+2 \u00a1PICOTAZO DESTRUIDO!")
-                            self._add_message("\u00a1Pez globo destruido de un picotazo! +2 monedas")
+            if bird_osp.peck_phase == 'going':
+                bird_osp.x += bird_osp._peck_vx
+                bird_osp.y += bird_osp._peck_vy
+                bird_osp.x = max(30.0, min(float(SCREEN_WIDTH - 30), bird_osp.x))
+                bird_osp.y = max(20.0, min(float(SCREEN_HEIGHT - 30), bird_osp.y))
+                # damage enemies in path — slow down on contact (each enemy hit once)
+                hit_boss = False
+                if self.boss is not None and self.boss.alive:
+                    bdist = math.hypot(bird_osp.x - self.boss.x, bird_osp.y - self.boss.y)
+                    if bdist < self.boss.radius + 22 and id(self.boss) not in bird_osp._peck_hit_ids:
+                        bird_osp._peck_hit_ids.add(id(self.boss))
+                        dmg = 6
+                        self.boss.hp       -= dmg
+                        self.boss.hit_flash = 35
+                        bird_osp._peck_vx  *= 0.40
+                        bird_osp._peck_vy  *= 0.40
+                        hit_boss = True
+                        if self.boss.hp <= 0:
+                            self.boss.alive = False
+                            reward = 50 if isinstance(self.boss, OctopusBoss) else 25
+                            self.caught_count += reward
+                            boss_name = "PULPO" if isinstance(self.boss, OctopusBoss) else "TIBUR\u00d3N"
+                            self._add_floater(int(self.boss.x), int(self.boss.y) - 60,
+                                              f"+{reward} \u00a1JEFE DERROTADO!")
+                            self._add_message(
+                                f"\u2605 \u00a1{boss_name} DERROTADO por el picotazo! +{reward} monedas!")
+                            self.wave_clear_timer = 210
                         else:
-                            self._add_floater(int(pf.x), int(pf.y) - 30, f"\u00a1PICOTAZO! -{dmg}\u2665")
-                        break
-            # reached target or gone past water → stop
-            reached = (math.hypot(bird_osp.x - bird_osp._peck_tx,
-                                  bird_osp.y - bird_osp._peck_ty) < 20)
-            if reached or bird_osp.y >= WATER_Y - 5:
-                bird_osp.peck_dash = False
-                bird_osp.vy = -4.0   # bounce back up
+                            self._add_floater(int(self.boss.x), int(self.boss.y) - 40,
+                                              f"\u00a1PICOTAZO! -{dmg}\u2665")
+                if not hit_boss:
+                    for pf in self.puffer_list:
+                        if not pf.alive or id(pf) in bird_osp._peck_hit_ids:
+                            continue
+                        pdist = math.hypot(bird_osp.x - pf.x, bird_osp.y - pf.y)
+                        if pdist < pf.radius + 22:
+                            bird_osp._peck_hit_ids.add(id(pf))
+                            dmg = max(3, 3 + self.upgrades['damage'] * 5)
+                            pf.hp        -= dmg
+                            pf.hit_flash  = 25
+                            bird_osp._peck_vx *= 0.45
+                            bird_osp._peck_vy *= 0.45
+                            if pf.hp <= 0:
+                                pf.alive = False
+                                self.caught_count += 2
+                                self._add_floater(int(pf.x), int(pf.y) - 30, "+2 \u00a1PICOTAZO DESTRUIDO!")
+                                self._add_message("\u00a1Pez globo destruido de un picotazo! +2 monedas")
+                            else:
+                                self._add_floater(int(pf.x), int(pf.y) - 30, f"\u00a1PICOTAZO! -{dmg}\u2665")
+                # reached target or nearly stopped → switch to return phase
+                reached = (math.hypot(bird_osp.x - bird_osp._peck_tx,
+                                      bird_osp.y - bird_osp._peck_ty) < 24)
+                speed = math.hypot(bird_osp._peck_vx, bird_osp._peck_vy)
+                if reached or speed < 4.0:
+                    dx = bird_osp._peck_rx - bird_osp.x
+                    dy = bird_osp._peck_ry - bird_osp.y
+                    d  = math.hypot(dx, dy)
+                    if d < 1:
+                        bird_osp.peck_dash  = False
+                        bird_osp.peck_phase = 'off'
+                    else:
+                        bird_osp.peck_phase = 'returning'
+                        spd = 28.0
+                        bird_osp._peck_vx = dx / d * spd
+                        bird_osp._peck_vy = dy / d * spd
+            elif bird_osp.peck_phase == 'returning':
+                bird_osp.x += bird_osp._peck_vx
+                bird_osp.y += bird_osp._peck_vy
+                bird_osp.x = max(30.0, min(float(SCREEN_WIDTH - 30), bird_osp.x))
+                bird_osp.y = max(20.0, min(float(SCREEN_HEIGHT - 30), bird_osp.y))
+                returned = (math.hypot(bird_osp.x - bird_osp._peck_rx,
+                                       bird_osp.y - bird_osp._peck_ry) < 28)
+                if returned:
+                    bird_osp.x          = bird_osp._peck_rx
+                    bird_osp.y          = bird_osp._peck_ry
+                    bird_osp.vx         = 0.0
+                    bird_osp.vy         = 0.0
+                    bird_osp.peck_dash  = False
+                    bird_osp.peck_phase = 'off'
+                    bird_osp.state      = 'flying'
+                    self.state          = GameState.FLYING
+
+        # ── osprey drill dash (taladro E-special) ──────────────────────────
+        if bird_osp.drill_dash:
+            if bird_osp.drill_phase == 'going':
+                bird_osp.x += bird_osp._drill_vx
+                bird_osp.y += bird_osp._drill_vy
+                bird_osp.x = max(30.0, min(float(SCREEN_WIDTH - 30), bird_osp.x))
+                bird_osp.y = max(20.0, min(float(SCREEN_HEIGHT - 30), bird_osp.y))
+                # damage enemies in path, slow on contact
+                if self.boss is not None and self.boss.alive:
+                    bdist = math.hypot(bird_osp.x - self.boss.x, bird_osp.y - self.boss.y)
+                    if bdist < self.boss.radius + 35 and id(self.boss) not in bird_osp._drill_hit_ids:
+                        bird_osp._drill_hit_ids.add(id(self.boss))
+                        dmg = 10
+                        self.boss.hp       -= dmg
+                        self.boss.hit_flash = 40
+                        bird_osp._drill_vx *= 0.35
+                        bird_osp._drill_vy *= 0.35
+                        if self.boss.hp <= 0:
+                            self.boss.alive = False
+                            reward = 50 if isinstance(self.boss, OctopusBoss) else 25
+                            self.caught_count += reward
+                            boss_name = "PULPO" if isinstance(self.boss, OctopusBoss) else "TIBUR\u00d3N"
+                            self._add_floater(int(self.boss.x), int(self.boss.y) - 60,
+                                              f"+{reward} \u00a1JEFE DERROTADO!")
+                            self._add_message(
+                                f"\u2605 \u00a1{boss_name} DERROTADO por el taladro! +{reward} monedas!")
+                            self.wave_clear_timer = 210
+                        else:
+                            self._add_floater(int(self.boss.x), int(self.boss.y) - 40,
+                                              f"\u00a1TALADRO! -{dmg}\u2665")
+                else:
+                    for pf in self.puffer_list:
+                        if not pf.alive or id(pf) in bird_osp._drill_hit_ids:
+                            continue
+                        pdist = math.hypot(bird_osp.x - pf.x, bird_osp.y - pf.y)
+                        if pdist < pf.radius + 32:
+                            bird_osp._drill_hit_ids.add(id(pf))
+                            dmg = max(5, 5 + self.upgrades['damage'] * 8)
+                            pf.hp       -= dmg
+                            pf.hit_flash = 25
+                            bird_osp._drill_vx *= 0.50
+                            bird_osp._drill_vy *= 0.50
+                            if pf.hp <= 0:
+                                pf.alive = False
+                                self.caught_count += 2
+                                self._add_floater(int(pf.x), int(pf.y) - 30, "+2 \u00a1TALADRO DESTRUIDO!")
+                            else:
+                                self._add_floater(int(pf.x), int(pf.y) - 30, f"\u00a1TALADRO! -{dmg}\u2665")
+                # reached target or nearly stopped → return
+                d_reached = (math.hypot(bird_osp.x - bird_osp._drill_tx,
+                                        bird_osp.y - bird_osp._drill_ty) < 28)
+                d_speed = math.hypot(bird_osp._drill_vx, bird_osp._drill_vy)
+                if d_reached or d_speed < 5.0:
+                    dx = bird_osp._drill_rx - bird_osp.x
+                    dy = bird_osp._drill_ry - bird_osp.y
+                    d  = math.hypot(dx, dy)
+                    if d < 1:
+                        bird_osp.drill_dash  = False
+                        bird_osp.drill_phase = 'off'
+                        bird_osp.drill_angle = 0.0
+                    else:
+                        bird_osp.drill_phase = 'returning'
+                        spd = 14.0
+                        bird_osp._drill_vx = dx / d * spd
+                        bird_osp._drill_vy = dy / d * spd
+            elif bird_osp.drill_phase == 'returning':
+                bird_osp.x += bird_osp._drill_vx
+                bird_osp.y += bird_osp._drill_vy
+                bird_osp.x = max(30.0, min(float(SCREEN_WIDTH - 30), bird_osp.x))
+                bird_osp.y = max(20.0, min(float(SCREEN_HEIGHT - 30), bird_osp.y))
+                d_returned = (math.hypot(bird_osp.x - bird_osp._drill_rx,
+                                         bird_osp.y - bird_osp._drill_ry) < 30)
+                if d_returned:
+                    bird_osp.x           = bird_osp._drill_rx
+                    bird_osp.y           = bird_osp._drill_ry
+                    bird_osp.vx          = 0.0
+                    bird_osp.vy          = 0.0
+                    bird_osp.drill_dash  = False
+                    bird_osp.drill_phase = 'off'
+                    bird_osp.drill_angle = 0.0
+                    bird_osp.state       = 'flying'
+                    self.state           = GameState.FLYING
 
         # ── update bullets & check puffer hit ────
         for b in self.bullets:
@@ -1771,7 +1961,7 @@ class Game:
                 dist = math.hypot(b.x - pf.x, b.y - pf.y)
                 if dist < b.radius + pf.radius:
                     b.alive      = False
-                    pf.hp       -= 1
+                    pf.hp       -= self.bullet_damage
                     pf.hit_flash = 25
                     if pf.hp <= 0:
                         pf.alive = False
@@ -2032,6 +2222,30 @@ class Game:
                 trail_surf = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
                 pygame.draw.circle(trail_surf, (120, 200, 255, alpha), (r + 1, r + 1), r)
                 self.screen.blit(trail_surf, (tx - r - 1, ty - r - 1))
+        # osprey drill visual — spinning tornado rings
+        if osp.drill_dash:
+            cx, cy = int(osp.x), int(osp.y)
+            ang = osp.drill_angle
+            ds = pygame.Surface((100, 100), pygame.SRCALPHA)
+            # outer spinning ring
+            pygame.draw.circle(ds, (255, 220, 60, 90), (50, 50), 44, 4)
+            # 3 spinning spokes
+            for j in range(3):
+                a = math.radians(ang + j * 120)
+                x1 = int(50 + 18 * math.cos(a))
+                y1 = int(50 + 18 * math.sin(a))
+                x2 = int(50 + 42 * math.cos(a))
+                y2 = int(50 + 42 * math.sin(a))
+                pygame.draw.line(ds, (255, 240, 80, 220), (x1, y1), (x2, y2), 4)
+            # inner ring
+            pygame.draw.circle(ds, (255, 160, 30, 160), (50, 50), 20, 3)
+            # 6 spinning dots on middle ring
+            for j in range(6):
+                a = math.radians(ang * 2 + j * 60)
+                dpx = int(50 + 30 * math.cos(a))
+                dpy = int(50 + 30 * math.sin(a))
+                pygame.draw.circle(ds, (255, 255, 120, 200), (dpx, dpy), 4)
+            self.screen.blit(ds, (cx - 50, cy - 50))
         for bird in [self.pelican, self.osprey]:
             bird.draw(self.screen)
 
@@ -2240,8 +2454,8 @@ class Game:
             pygame.draw.polygon(self.screen, (80, 210, 255),
                                 [(ax + 7, ammo_y - 3), (ax + 11, ammo_y),
                                  (ax + 7, ammo_y + 3)])
-        # [F] label for active bird
-        if bird is self.active_bird:
+        # [clic der] label only for pelican (osprey shows peck cooldown in special section)
+        if bird is self.active_bird and bird.bird_type == 'pelican':
             f_lbl = self.font_sm.render("[clic der] dispara", True, (80, 220, 255))
             self.screen.blit(f_lbl, (cx - f_lbl.get_width() // 2, ammo_y + 12))
 
@@ -2254,16 +2468,22 @@ class Game:
             else:
                 label = "[Q] ¡RÁFAGA LISTA!"
                 col   = (255, 220, 60)
+            sp_lbl = self.font_sm.render(label, True, col)
+            self.screen.blit(sp_lbl, (cx - sp_lbl.get_width() // 2, ammo_y + 30))
         else:
-            if bird.special_cooldown > 0:
-                pct   = 1.0 - bird.special_cooldown / 300
-                label = f"[E] Picotazo {int(pct*100)}%"
-                col   = (150, 180, 255)
+            # osprey: peck (right-click) + drill [E] cooldowns
+            if bird.peck_cooldown > 0:
+                pct    = 1.0 - bird.peck_cooldown / 180
+                pk_lbl = self.font_sm.render(f"[clic] Peck {int(pct*100)}%", True, (100, 200, 255))
             else:
-                label = "[E] ¡PICOTAZO LISTO!"
-                col   = (100, 220, 255)
-        sp_lbl = self.font_sm.render(label, True, col)
-        self.screen.blit(sp_lbl, (cx - sp_lbl.get_width() // 2, ammo_y + 30))
+                pk_lbl = self.font_sm.render("[clic] ¡PECK LISTO!", True, (80, 230, 255))
+            self.screen.blit(pk_lbl, (cx - pk_lbl.get_width() // 2, ammo_y + 12))
+            if bird.special_cooldown > 0:
+                pct      = 1.0 - bird.special_cooldown / 420
+                dr_lbl   = self.font_sm.render(f"[E] Taladro {int(pct*100)}%", True, (255, 200, 50))
+            else:
+                dr_lbl   = self.font_sm.render("[E] ¡TALADRO LISTO!", True, (255, 230, 60))
+            self.screen.blit(dr_lbl, (cx - dr_lbl.get_width() // 2, ammo_y + 30))
     def _draw_start_screen(self):
         # overlay
         ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -2291,7 +2511,7 @@ class Game:
             "Toca el cielo para empezar  |  PLAY para comenzar",
             "WASD / Flechas: mover el ave  |  Clic izq/Espacio: zambullirse  |  Clic der: disparar",
             "Z: Pelicano se zambulle  |  X: Ave pescadora se zambulle",
-            "En oleadas de jefe   →   Q: Ráfaga (pelicano) | E: Picotazo (pescador)",
+            "Q: Ráfaga pelicano | Clic-der osprey: peck dive | E: ¡Taladro relámpago!",
         ]):
             s = self.font_sm.render(line, True, (195, 230, 255))
             self.screen.blit(s, (80, 318 + i * 28))
@@ -2447,6 +2667,7 @@ class Game:
             ('depth',    'Bucear mas hondo',    'Niv.1-3: +70px / Niv.4-5: +70px mas',   (80, 160, 230)),
             ('capacity', 'Red mas grande',      'Cada nivel: +15px de alcance',            (80, 210, 120)),
             ('luck',     'Suerte pez dorado',   'Cada nivel: +20% chance pez dorado',     (255, 200, 0)),
+            ('damage',   '¡Más daño!',          'Cada nivel: +1 daño. MAX = 1 tiro',      (255, 80,  80)),
         ]
 
         lf = pygame.font.Font(None, 24)
