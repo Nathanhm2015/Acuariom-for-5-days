@@ -1557,6 +1557,8 @@ class Game:
             ('Selva',    (120, 200, 100), (40,  110, 40),  (160, 200, 60),  1.00, 5, 1.00, 1.00, 'leaves', 80),
             ('Dorado',   (255, 230, 120), (200, 160, 20),  (255, 200, 50),  2.00, 8, 2.00, 2.00, 'gold',   150),
             ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',-5),
+            ('Arrecife', (255, 155, 140), (150, 45, 70),   (255, 220, 150), 0.15, 1, 0.15, 0.15, 'water', 180),
+            ('Aurora',   (165, 235, 220), (25, 100, 120),  (255, 210, 100), 0.20, 2, 0.20, 0.20, 'silver',220),
         ]
         self.osprey_skins = [
             ('Clasico',  (230, 225, 215), (72,  50,  25),  (38,  32,  28),  0,    0, 0.00, 0.00, '',        0),
@@ -1566,6 +1568,8 @@ class Game:
             ('Bosque',   (100, 170, 80),  (35,  90,  35),  (130, 180, 50),  1.00, 5, 1.00, 1.00, 'leaves', 80),
             ('Platino',  (210, 220, 230), (130, 145, 165), (145, 155, 170), 2.00, 8, 2.00, 2.00, 'silver', 150),
             ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',-5),
+            ('Marea',    (100, 210, 235), (20, 85, 130),   (255, 185, 90),  0.15, 1, 0.15, 0.15, 'water', 180),
+            ('Volcan',   (255, 175, 110), (125, 45, 30),   (45, 35, 30),    0.20, 2, 0.20, 0.20, 'fire',  220),
         ]
         self.pelican_skin_idx = 0
         self.osprey_skin_idx  = 0
@@ -2291,11 +2295,37 @@ class Game:
         self._pickup_spawn_timer = 300
         self._add_message("Martin: Use arrows/WASD to fly! Z=pelican dive, X=osprey dive")
 
-    def _maybe_spawn_shrimp_pickup(self, x, y):
-        if random.random() >= 0.05:
+    def _maybe_spawn_shrimp_pickup(self, x, y, chance=0.08):
+        if random.random() >= chance:
             return False
         self.shrimp_pickups.append(ShrimpPickup(x, y))
         return True
+
+    def _spawn_shrimp_pickup_near_bird(self, bird, chance):
+        offset = 80 if bird.x < SCREEN_WIDTH / 2 else -80
+        x = max(20, min(SCREEN_WIDTH - 20, bird.x + offset))
+        return self._maybe_spawn_shrimp_pickup(x, bird.y, chance)
+
+    def _collect_shrimp_pickups(self):
+        for shrimp in self.shrimp_pickups:
+            shrimp.update()
+            if not shrimp.alive:
+                continue
+            for bird in (self.pelican, self.osprey):
+                if bird.hp <= 0 or bird.state not in ('flying', 'diving', 'underwater', 'rising'):
+                    continue
+                distance = math.hypot(bird.x - shrimp.x, bird.y - shrimp.y)
+                if distance >= bird.capture_radius // 2 + shrimp.radius:
+                    continue
+                shrimp.alive = False
+                if bird.bird_type == 'pelican':
+                    self.shrimp_charge += 1
+                    self._add_message("¡Camarón recogido! El pico del pelícano está listo.")
+                else:
+                    self.stamina = min(self.max_stamina, self.stamina + 15)
+                    self._add_message("¡Camarón recogido! El ave pescadora recuperó stamina.")
+                break
+        self.shrimp_pickups = [shrimp for shrimp in self.shrimp_pickups if shrimp.alive]
 
     def _shoot(self, bird, target=None):
         if self.state != GameState.FLYING:
@@ -2599,6 +2629,7 @@ class Game:
                     self._add_floater(bird.x, bird.y - 30, lbl)
                     self._add_message(f"Chris: {'Pez dorado x3!' if fish.golden else 'Buen pescado!'} Total: {self.caught_count}")
                     self.fish_list.append(_spawn_fish(self.upgrades['luck']))
+                    self._spawn_shrimp_pickup_near_bird(bird, chance=0.06)
                     if fish.golden:
                         self.golden_caught_total += 1
                     else:
@@ -2627,7 +2658,7 @@ class Game:
                         self._add_floater(bird.x, bird.y - 30, "+2")
                         self._add_message(f"Chris: Crab caught! x2 bonus! Total: {self.caught_count}")
                         self.crab_list.append(Crab())
-                        self._maybe_spawn_shrimp_pickup(crab.x, crab.y - 18)
+                        self._spawn_shrimp_pickup_near_bird(bird, chance=0.22)
                         self.crabs_caught_total += 1
                         self.fish_this_wave += 1
                         self._check_wave_complete()
@@ -2690,6 +2721,7 @@ class Game:
                     self._add_floater(bird.x, bird.y - 30, lbl)
                     self._add_message(f"Chris: {'Pez dorado x3!' if fish.golden else 'Buen pescado!'} Total: {self.caught_count}")
                     self.fish_list.append(_spawn_fish(self.upgrades['luck']))
+                    self._spawn_shrimp_pickup_near_bird(bird, chance=0.06)
                     if fish.golden:
                         self.golden_caught_total += 1
                     else:
@@ -2938,24 +2970,7 @@ class Game:
                             self.state = GameState.GAME_OVER
                         break
 
-        # ── update shrimp pickups ─────────────────
-        for shp in self.shrimp_pickups:
-            shp.update()
-        if self.state == GameState.FLYING:
-            for shp in self.shrimp_pickups:
-                if not shp.alive:
-                    continue
-                for bird in [self.pelican, self.osprey]:
-                    if bird.state != 'flying':
-                        continue
-                    dist = math.hypot(bird.x - shp.x, bird.y - shp.y)
-                    if dist < bird.capture_radius // 2 + shp.radius:
-                        shp.alive = False
-                        if bird.bird_type == 'pelican':
-                            self.shrimp_charge += 1
-                            self._add_message("¡Camarón recogido! El pico del pelícano está listo.")
-                        break
-        self.shrimp_pickups = [shp for shp in self.shrimp_pickups if shp.alive]
+        self._collect_shrimp_pickups()
 
         # ── update ammo pickups ──────────────────
         for pk in self.bullet_pickups:
@@ -3281,11 +3296,17 @@ class Game:
 
         # ── level indicator ──────────────────────
         lev_y = by + bh + 6
-        progress_name = "Nivel" if self.game_mode == 'levels' else "Oleada"
-        lbl_niv = self.font_sm.render(f"{progress_name} {self.wave}", True, (255, 200, 50))
+        if self.game_mode == 'levels':
+            progress_label = f"Nivel {self.campaign_level}"
+            wave_label = self.font_sm.render(f"Oleada {self.wave}/5", True, (255, 200, 50))
+            self.screen.blit(wave_label, (bx + 78, lev_y))
+            pb_x, pb_y, pb_w, pb_h = bx + 165, lev_y + 3, 95, 12
+        else:
+            progress_label = f"Oleada {self.wave}"
+            pb_x, pb_y, pb_w, pb_h = bx + 78, lev_y + 3, 180, 12
+        lbl_niv = self.font_sm.render(progress_label, True, (255, 200, 50))
         self.screen.blit(lbl_niv, (bx, lev_y))
         prog_pct = min(1.0, self.fish_this_wave / self.wave_target)
-        pb_x, pb_y, pb_w, pb_h = bx + 78, lev_y + 3, 180, 12
         pygame.draw.rect(self.screen, (30, 50, 30), (pb_x, pb_y, pb_w, pb_h), border_radius=3)
         pb_fill = int(pb_w * prog_pct)
         if pb_fill > 0:

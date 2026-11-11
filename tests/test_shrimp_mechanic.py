@@ -1,5 +1,6 @@
 import unittest
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 import os
 
@@ -128,6 +129,32 @@ class ShrimpMechanicTests(unittest.TestCase):
         self.assertEqual(len(game_obj.shrimp_pickups), 1)
         self.assertEqual(game_obj.shrimp_pickups[0].x, 120)
         self.assertEqual(game_obj.shrimp_pickups[0].y, 180)
+
+    def test_shrimp_pickup_rewards_both_birds_underwater(self):
+        for bird_type in ('pelican', 'osprey'):
+            game_obj = game.Game.__new__(game.Game)
+            game_obj.pelican = SimpleNamespace(
+                hp=20, state='flying', x=700, y=100, capture_radius=48,
+                bird_type='pelican')
+            game_obj.osprey = SimpleNamespace(
+                hp=12, state='flying', x=800, y=100, capture_radius=32,
+                bird_type='osprey')
+            bird = game_obj.pelican if bird_type == 'pelican' else game_obj.osprey
+            bird.state = 'underwater'
+            bird.x = bird.y = 200
+            game_obj.shrimp_pickups = [game.ShrimpPickup(200, 200)]
+            game_obj.shrimp_charge = 0
+            game_obj.stamina = 50
+            game_obj.max_stamina = 100
+            game_obj._add_message = lambda message: None
+
+            game_obj._collect_shrimp_pickups()
+
+            self.assertEqual(game_obj.shrimp_pickups, [])
+            if bird_type == 'pelican':
+                self.assertEqual(game_obj.shrimp_charge, 1)
+            else:
+                self.assertEqual(game_obj.stamina, 65)
 
     def test_recovery_upgrade_increases_stamina_capacity(self):
         game_obj = game.Game.__new__(game.Game)
