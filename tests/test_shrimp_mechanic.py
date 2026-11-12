@@ -39,6 +39,37 @@ class ShrimpMechanicTests(unittest.TestCase):
         self.assertEqual(game.STAMINA_DRAIN_SECONDS, 45)
         self.assertEqual(game.BOSS_STAMINA_DRAIN_SECONDS, 90)
 
+    def test_dive_requires_the_full_stamina_cost(self):
+        game_obj = game.Game.__new__(game.Game)
+        game_obj.state = game.GameState.FLYING
+        game_obj.stamina = 19
+        messages = []
+        game_obj._add_message = messages.append
+        bird = SimpleNamespace(start_dive=lambda: self.fail('dive should not start'))
+
+        game_obj._dive(bird)
+
+        self.assertEqual(game_obj.stamina, 19)
+        self.assertEqual(game_obj.state, game.GameState.FLYING)
+        self.assertTrue(messages)
+
+        bird.start_dive = lambda: True
+        game_obj.stamina = 20
+        game_obj._dive(bird)
+        self.assertEqual(game_obj.stamina, 0)
+        self.assertEqual(game_obj.state, game.GameState.DIVING)
+
+    def test_tutorial_is_shown_only_until_completed(self):
+        game_obj = game.Game.__new__(game.Game)
+        game_obj.tutorial_seen = False
+        game_obj.state = game.GameState.START
+        game_obj._open_tutorial()
+        self.assertEqual(game_obj.state, game.GameState.TUTORIAL)
+
+        game_obj.tutorial_seen = True
+        game_obj._open_tutorial()
+        self.assertEqual(game_obj.state, game.GameState.MODE_SELECT)
+
     def test_completing_a_level_unlocks_the_next_one(self):
         game_obj = game.Game.__new__(game.Game)
         game_obj.game_mode = 'levels'
@@ -69,16 +100,19 @@ class ShrimpMechanicTests(unittest.TestCase):
             game_obj._level_progress_path = progress_path
             game_obj.unlocked_level = 3
             game_obj.completed_level = 2
+            game_obj.tutorial_seen = True
             game_obj._save_level_progress()
 
             loaded_game = game.Game.__new__(game.Game)
             loaded_game._level_progress_path = progress_path
             loaded_game.unlocked_level = 1
             loaded_game.completed_level = 0
+            loaded_game.tutorial_seen = False
             loaded_game._load_level_progress()
 
             self.assertEqual(loaded_game.unlocked_level, 3)
             self.assertEqual(loaded_game.completed_level, 2)
+            self.assertTrue(loaded_game.tutorial_seen)
 
     def test_ai_companion_keeps_flying_during_a_dive(self):
         for active_type in ('pelican', 'osprey'):

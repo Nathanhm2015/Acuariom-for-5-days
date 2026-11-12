@@ -6,23 +6,8 @@ import math
 import os
 import random
 import sys
-import smtplib
-import threading
 import colorsys
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from enum import Enum
-
-# ── Correo del remitente ─────────────────────────────────────────────────────
-#  1. Activa la verificación en 2 pasos en tu Gmail:
-#     https://myaccount.google.com/signinoptions/two-step-verification
-#  2. Ve a: https://myaccount.google.com/apppasswords
-#     → Nombre de la app: "Wings and Fish" → GENERAR
-#  3. Copia las 16 letras que te da Google (sin espacios) y pégalas abajo:
-EMAIL_SENDER   = "nathanherreramadrigal@gmail.com"
-EMAIL_PASSWORD = "ItsTimeToCom3+"   # <-- REEMPLAZA esto con la contraseña de app de 16 letras
-EMAIL_OWNER    = "nathanherreramadrigal@gmail.com"   # correo donde te llegan los avisos de compra
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Optional Pillow — used to load animated GIF frames
 try:
@@ -1424,6 +1409,7 @@ class Game:
         self.campaign_level   = 1
         self.unlocked_level   = 1
         self.completed_level  = 0
+        self.tutorial_seen = False
         self._level_progress_path = os.path.expanduser('~/.wings_and_fish_progress.json')
         self._load_level_progress()
         self.fish_this_wave   = 0     # fish caught this wave (counts toward wave_target)
@@ -1989,6 +1975,8 @@ class Game:
                 if self.state == GameState.TUTORIAL:
                     if (self.btn_tutorial_continue.collidepoint(mx, my) or
                             self.btn_tutorial_skip.collidepoint(mx, my)):
+                        self.tutorial_seen = True
+                        self._save_level_progress()
                         self._open_mode_select()
                     return True
 
@@ -2476,7 +2464,7 @@ class Game:
     def _dive(self, bird):
         if self.state != GameState.FLYING:
             return
-        if self.stamina < 15:
+        if self.stamina < 20:
             self._add_message("Chris: The bird needs to rest! Low energy.")
             return
         if bird.start_dive():
@@ -2488,7 +2476,10 @@ class Game:
         self.state = GameState.MODE_SELECT
 
     def _open_tutorial(self):
-        self.state = GameState.TUTORIAL
+        if self.tutorial_seen:
+            self._open_mode_select()
+        else:
+            self.state = GameState.TUTORIAL
 
     def _load_level_progress(self):
         try:
@@ -2500,6 +2491,7 @@ class Game:
             self.completed_level = min(
                 self.unlocked_level - 1,
                 max(0, int(progress.get('completed_level', 0))))
+            self.tutorial_seen = bool(progress.get('tutorial_seen', False))
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 
@@ -2509,6 +2501,7 @@ class Game:
                 json.dump({
                     'unlocked_level': self.unlocked_level,
                     'completed_level': self.completed_level,
+                    'tutorial_seen': getattr(self, 'tutorial_seen', False),
                 }, progress_file)
         except OSError:
             self._add_message('No se pudo guardar el progreso de niveles.')
@@ -3525,15 +3518,15 @@ class Game:
         self.screen.blit(t2, (80, 168))
 
         # subtitle
-        sub = self.font_title.render("Catch fish with seabirds!", True, WHITE)
+        sub = self.font_title.render("¡Pesca con tus aves marinas!", True, WHITE)
         self.screen.blit(sub, (80, 255))
 
         # instructions
         for i, line in enumerate([
             "Toca PLAY para elegir entre modo libre y niveles",
-            "WASD / Flechas: mover el ave  |  Clic izq/Espacio: zambullirse  |  Clic der: disparar",
-            "Z: Pelicano se zambulle  |  X: Ave pescadora se zambulle",
-            "Q: Ráfaga pelicano | Clic-der osprey: peck dive | E: ¡Taladro relámpago!",
+            "WASD / flechas: mover  |  Espacio o clic izquierdo: bucear",
+            "1 / 2: elegir ave  |  Z: buceo del pelícano  |  X: buceo pescador",
+            "Q: ráfaga del pelícano  |  clic derecho: picotazo  |  E: taladro",
         ]):
             s = self.font_sm.render(line, True, (195, 230, 255))
             self.screen.blit(s, (80, 318 + i * 28))
