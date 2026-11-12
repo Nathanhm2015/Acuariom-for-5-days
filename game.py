@@ -6,8 +6,23 @@ import math
 import os
 import random
 import sys
+import smtplib
+import threading
 import colorsys
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from enum import Enum
+
+# ── Correo del remitente ─────────────────────────────────────────────────────
+#  1. Activa la verificación en 2 pasos en tu Gmail:
+#     https://myaccount.google.com/signinoptions/two-step-verification
+#  2. Ve a: https://myaccount.google.com/apppasswords
+#     → Nombre de la app: "Wings and Fish" → GENERAR
+#  3. Copia las 16 letras que te da Google (sin espacios) y pégalas abajo:
+EMAIL_SENDER   = "nathanherreramadrigal@gmail.com"
+EMAIL_PASSWORD = "ItsTimeToCom3+"   # <-- REEMPLAZA esto con la contraseña de app de 16 letras
+EMAIL_OWNER    = "nathanherreramadrigal@gmail.com"   # correo donde te llegan los avisos de compra
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Optional Pillow — used to load animated GIF frames
 try:
@@ -1409,7 +1424,6 @@ class Game:
         self.campaign_level   = 1
         self.unlocked_level   = 1
         self.completed_level  = 0
-        self.tutorial_seen = False
         self._level_progress_path = os.path.expanduser('~/.wings_and_fish_progress.json')
         self._load_level_progress()
         self.fish_this_wave   = 0     # fish caught this wave (counts toward wave_target)
@@ -1543,8 +1557,6 @@ class Game:
             ('Selva',    (120, 200, 100), (40,  110, 40),  (160, 200, 60),  1.00, 5, 1.00, 1.00, 'leaves', 80),
             ('Dorado',   (255, 230, 120), (200, 160, 20),  (255, 200, 50),  2.00, 8, 2.00, 2.00, 'gold',   150),
             ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',-5),
-            ('Arrecife', (255, 155, 140), (150, 45, 70),   (255, 220, 150), 0.15, 1, 0.15, 0.15, 'water', 180),
-            ('Aurora',   (165, 235, 220), (25, 100, 120),  (255, 210, 100), 0.20, 2, 0.20, 0.20, 'silver',220),
         ]
         self.osprey_skins = [
             ('Clasico',  (230, 225, 215), (72,  50,  25),  (38,  32,  28),  0,    0, 0.00, 0.00, '',        0),
@@ -1554,8 +1566,6 @@ class Game:
             ('Bosque',   (100, 170, 80),  (35,  90,  35),  (130, 180, 50),  1.00, 5, 1.00, 1.00, 'leaves', 80),
             ('Platino',  (210, 220, 230), (130, 145, 165), (145, 155, 170), 2.00, 8, 2.00, 2.00, 'silver', 150),
             ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',-5),
-            ('Marea',    (100, 210, 235), (20, 85, 130),   (255, 185, 90),  0.15, 1, 0.15, 0.15, 'water', 180),
-            ('Volcan',   (255, 175, 110), (125, 45, 30),   (45, 35, 30),    0.20, 2, 0.20, 0.20, 'fire',  220),
         ]
         self.pelican_skin_idx = 0
         self.osprey_skin_idx  = 0
@@ -1975,8 +1985,6 @@ class Game:
                 if self.state == GameState.TUTORIAL:
                     if (self.btn_tutorial_continue.collidepoint(mx, my) or
                             self.btn_tutorial_skip.collidepoint(mx, my)):
-                        self.tutorial_seen = True
-                        self._save_level_progress()
                         self._open_mode_select()
                     return True
 
@@ -2283,37 +2291,11 @@ class Game:
         self._pickup_spawn_timer = 300
         self._add_message("Martin: Use arrows/WASD to fly! Z=pelican dive, X=osprey dive")
 
-    def _maybe_spawn_shrimp_pickup(self, x, y, chance=0.08):
-        if random.random() >= chance:
+    def _maybe_spawn_shrimp_pickup(self, x, y):
+        if random.random() >= 0.05:
             return False
         self.shrimp_pickups.append(ShrimpPickup(x, y))
         return True
-
-    def _spawn_shrimp_pickup_near_bird(self, bird, chance):
-        offset = 80 if bird.x < SCREEN_WIDTH / 2 else -80
-        x = max(20, min(SCREEN_WIDTH - 20, bird.x + offset))
-        return self._maybe_spawn_shrimp_pickup(x, bird.y, chance)
-
-    def _collect_shrimp_pickups(self):
-        for shrimp in self.shrimp_pickups:
-            shrimp.update()
-            if not shrimp.alive:
-                continue
-            for bird in (self.pelican, self.osprey):
-                if bird.hp <= 0 or bird.state not in ('flying', 'diving', 'underwater', 'rising'):
-                    continue
-                distance = math.hypot(bird.x - shrimp.x, bird.y - shrimp.y)
-                if distance >= bird.capture_radius // 2 + shrimp.radius:
-                    continue
-                shrimp.alive = False
-                if bird.bird_type == 'pelican':
-                    self.shrimp_charge += 1
-                    self._add_message("¡Camarón recogido! El pico del pelícano está listo.")
-                else:
-                    self.stamina = min(self.max_stamina, self.stamina + 15)
-                    self._add_message("¡Camarón recogido! El ave pescadora recuperó stamina.")
-                break
-        self.shrimp_pickups = [shrimp for shrimp in self.shrimp_pickups if shrimp.alive]
 
     def _shoot(self, bird, target=None):
         if self.state != GameState.FLYING:
@@ -2464,7 +2446,7 @@ class Game:
     def _dive(self, bird):
         if self.state != GameState.FLYING:
             return
-        if self.stamina < 20:
+        if self.stamina < 15:
             self._add_message("Chris: The bird needs to rest! Low energy.")
             return
         if bird.start_dive():
@@ -2476,10 +2458,7 @@ class Game:
         self.state = GameState.MODE_SELECT
 
     def _open_tutorial(self):
-        if self.tutorial_seen:
-            self._open_mode_select()
-        else:
-            self.state = GameState.TUTORIAL
+        self.state = GameState.TUTORIAL
 
     def _load_level_progress(self):
         try:
@@ -2491,7 +2470,6 @@ class Game:
             self.completed_level = min(
                 self.unlocked_level - 1,
                 max(0, int(progress.get('completed_level', 0))))
-            self.tutorial_seen = bool(progress.get('tutorial_seen', False))
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 
@@ -2501,7 +2479,6 @@ class Game:
                 json.dump({
                     'unlocked_level': self.unlocked_level,
                     'completed_level': self.completed_level,
-                    'tutorial_seen': getattr(self, 'tutorial_seen', False),
                 }, progress_file)
         except OSError:
             self._add_message('No se pudo guardar el progreso de niveles.')
@@ -2622,7 +2599,6 @@ class Game:
                     self._add_floater(bird.x, bird.y - 30, lbl)
                     self._add_message(f"Chris: {'Pez dorado x3!' if fish.golden else 'Buen pescado!'} Total: {self.caught_count}")
                     self.fish_list.append(_spawn_fish(self.upgrades['luck']))
-                    self._spawn_shrimp_pickup_near_bird(bird, chance=0.06)
                     if fish.golden:
                         self.golden_caught_total += 1
                     else:
@@ -2651,7 +2627,7 @@ class Game:
                         self._add_floater(bird.x, bird.y - 30, "+2")
                         self._add_message(f"Chris: Crab caught! x2 bonus! Total: {self.caught_count}")
                         self.crab_list.append(Crab())
-                        self._spawn_shrimp_pickup_near_bird(bird, chance=0.22)
+                        self._maybe_spawn_shrimp_pickup(crab.x, crab.y - 18)
                         self.crabs_caught_total += 1
                         self.fish_this_wave += 1
                         self._check_wave_complete()
@@ -2714,7 +2690,6 @@ class Game:
                     self._add_floater(bird.x, bird.y - 30, lbl)
                     self._add_message(f"Chris: {'Pez dorado x3!' if fish.golden else 'Buen pescado!'} Total: {self.caught_count}")
                     self.fish_list.append(_spawn_fish(self.upgrades['luck']))
-                    self._spawn_shrimp_pickup_near_bird(bird, chance=0.06)
                     if fish.golden:
                         self.golden_caught_total += 1
                     else:
@@ -2963,7 +2938,24 @@ class Game:
                             self.state = GameState.GAME_OVER
                         break
 
-        self._collect_shrimp_pickups()
+        # ── update shrimp pickups ─────────────────
+        for shp in self.shrimp_pickups:
+            shp.update()
+        if self.state == GameState.FLYING:
+            for shp in self.shrimp_pickups:
+                if not shp.alive:
+                    continue
+                for bird in [self.pelican, self.osprey]:
+                    if bird.state != 'flying':
+                        continue
+                    dist = math.hypot(bird.x - shp.x, bird.y - shp.y)
+                    if dist < bird.capture_radius // 2 + shp.radius:
+                        shp.alive = False
+                        if bird.bird_type == 'pelican':
+                            self.shrimp_charge += 1
+                            self._add_message("¡Camarón recogido! El pico del pelícano está listo.")
+                        break
+        self.shrimp_pickups = [shp for shp in self.shrimp_pickups if shp.alive]
 
         # ── update ammo pickups ──────────────────
         for pk in self.bullet_pickups:
@@ -3289,17 +3281,11 @@ class Game:
 
         # ── level indicator ──────────────────────
         lev_y = by + bh + 6
-        if self.game_mode == 'levels':
-            progress_label = f"Nivel {self.campaign_level}"
-            wave_label = self.font_sm.render(f"Oleada {self.wave}/5", True, (255, 200, 50))
-            self.screen.blit(wave_label, (bx + 78, lev_y))
-            pb_x, pb_y, pb_w, pb_h = bx + 165, lev_y + 3, 95, 12
-        else:
-            progress_label = f"Oleada {self.wave}"
-            pb_x, pb_y, pb_w, pb_h = bx + 78, lev_y + 3, 180, 12
-        lbl_niv = self.font_sm.render(progress_label, True, (255, 200, 50))
+        progress_name = "Nivel" if self.game_mode == 'levels' else "Oleada"
+        lbl_niv = self.font_sm.render(f"{progress_name} {self.wave}", True, (255, 200, 50))
         self.screen.blit(lbl_niv, (bx, lev_y))
         prog_pct = min(1.0, self.fish_this_wave / self.wave_target)
+        pb_x, pb_y, pb_w, pb_h = bx + 78, lev_y + 3, 180, 12
         pygame.draw.rect(self.screen, (30, 50, 30), (pb_x, pb_y, pb_w, pb_h), border_radius=3)
         pb_fill = int(pb_w * prog_pct)
         if pb_fill > 0:
@@ -3518,15 +3504,15 @@ class Game:
         self.screen.blit(t2, (80, 168))
 
         # subtitle
-        sub = self.font_title.render("¡Pesca con tus aves marinas!", True, WHITE)
+        sub = self.font_title.render("Catch fish with seabirds!", True, WHITE)
         self.screen.blit(sub, (80, 255))
 
         # instructions
         for i, line in enumerate([
             "Toca PLAY para elegir entre modo libre y niveles",
-            "WASD / flechas: mover  |  Espacio o clic izquierdo: bucear",
-            "1 / 2: elegir ave  |  Z: buceo del pelícano  |  X: buceo pescador",
-            "Q: ráfaga del pelícano  |  clic derecho: picotazo  |  E: taladro",
+            "WASD / Flechas: mover el ave  |  Clic izq/Espacio: zambullirse  |  Clic der: disparar",
+            "Z: Pelicano se zambulle  |  X: Ave pescadora se zambulle",
+            "Q: Ráfaga pelicano | Clic-der osprey: peck dive | E: ¡Taladro relámpago!",
         ]):
             s = self.font_sm.render(line, True, (195, 230, 255))
             self.screen.blit(s, (80, 318 + i * 28))
