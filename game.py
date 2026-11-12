@@ -6,23 +6,8 @@ import math
 import os
 import random
 import sys
-import smtplib
-import threading
 import colorsys
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from enum import Enum
-
-# ── Correo del remitente ─────────────────────────────────────────────────────
-#  1. Activa la verificación en 2 pasos en tu Gmail:
-#     https://myaccount.google.com/signinoptions/two-step-verification
-#  2. Ve a: https://myaccount.google.com/apppasswords
-#     → Nombre de la app: "Wings and Fish" → GENERAR
-#  3. Copia las 16 letras que te da Google (sin espacios) y pégalas abajo:
-EMAIL_SENDER   = "nathanherreramadrigal@gmail.com"
-EMAIL_PASSWORD = "ItsTimeToCom3+"   # <-- REEMPLAZA esto con la contraseña de app de 16 letras
-EMAIL_OWNER    = "nathanherreramadrigal@gmail.com"   # correo donde te llegan los avisos de compra
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Optional Pillow — used to load animated GIF frames
 try:
@@ -87,6 +72,7 @@ MAX_WAVE_FISH_COUNT = 34
 STAMINA_DRAIN_SECONDS = 45
 BOSS_STAMINA_DRAIN_SECONDS = 90
 CAMPAIGN_LEVEL_COUNT = 20
+SHRIMP_DROP_CHANCE = 0.18
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -976,9 +962,14 @@ class ShrimpPickup:
         self.alive = True
         self.frame = 0
         self.radius = 14
+        self.float_y = min(self.y, WATER_Y - 36)
 
     def update(self):
         self.frame += 1
+        if self.y > self.float_y:
+            self.y = max(self.float_y, self.y - 1.6)
+        else:
+            self.y = self.float_y + math.sin(self.frame * 0.08) * 3
 
     def draw(self, screen):
         if not self.alive:
@@ -1425,7 +1416,7 @@ class Game:
         self.unlocked_level   = 1
         self.completed_level  = 0
         self._level_progress_path = os.path.expanduser('~/.wings_and_fish_progress.json')
-        self._load_level_progress()
+        self._progress_save_timer = FPS * 5
         self.fish_this_wave   = 0     # fish caught this wave (counts toward wave_target)
         self.wave_target      = 8     # fish needed to complete the wave
         self.wave_clear_timer = 0     # >0: wave banner showing; 0 → advance wave
@@ -1507,7 +1498,6 @@ class Game:
         self.item_store_btns    = [pygame.Rect(0, 0, 160, 44) for _ in range(5)]
         self.btn_close_item_store = pygame.Rect(0, 0, 40, 40)
         # ── purchase form ─────────────────────────
-        self.gems                    = 0
         self._pf_fields              = {'Nombre': '', 'Cédula': '', 'Celular': '', 'Dirección': '', 'Correo': ''}
         self._pf_active              = None
         self._pf_records             = []
@@ -1548,7 +1538,7 @@ class Game:
         # Tuple: (display_name, body_color, wing_color, beak_color,
         #         luck_bonus, fish_bonus, damage_bonus_pct, stamina_bonus_pct, effect, cost)
         # effect: '' | 'fire' | 'water' | 'stars' | 'leaves' | 'gold' | 'silver' | 'rainbow'
-        # cost: fish coins (>= 0) or -5 = costs $5 USD via purchase form
+        # cost: fish coins
         self.pelican_skins = [
             ('Clasico',  (235, 225, 200), (80,  52,  28),  (145, 140, 135), 0,    0, 0.00, 0.00, '',        0),
             ('Marino',   (180, 210, 230), (30,  80,  140), (100, 120, 150), 0.10, 1, 0.10, 0.10, 'water',  10),
@@ -1556,7 +1546,9 @@ class Game:
             ('Noche',    (50,  50,  70),  (20,  20,  40),  (80,  80,  110), 0.50, 3, 0.50, 0.50, 'stars',  50),
             ('Selva',    (120, 200, 100), (40,  110, 40),  (160, 200, 60),  1.00, 5, 1.00, 1.00, 'leaves', 80),
             ('Dorado',   (255, 230, 120), (200, 160, 20),  (255, 200, 50),  2.00, 8, 2.00, 2.00, 'gold',   150),
-            ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',-5),
+            ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',300),
+            ('Coral',    (255, 135, 125), (170, 45, 70),   (255, 210, 150), 1.25, 6, 1.25, 1.25, 'water',  110),
+            ('Tormenta', (185, 210, 230), (45, 65, 105),   (230, 235, 245), 1.50, 7, 1.50, 1.50, 'stars',  125),
         ]
         self.osprey_skins = [
             ('Clasico',  (230, 225, 215), (72,  50,  25),  (38,  32,  28),  0,    0, 0.00, 0.00, '',        0),
@@ -1565,13 +1557,16 @@ class Game:
             ('Sombra',   (60,  60,  80),  (25,  25,  45),  (90,  90,  120), 0.50, 3, 0.50, 0.50, 'stars',  50),
             ('Bosque',   (100, 170, 80),  (35,  90,  35),  (130, 180, 50),  1.00, 5, 1.00, 1.00, 'leaves', 80),
             ('Platino',  (210, 220, 230), (130, 145, 165), (145, 155, 170), 2.00, 8, 2.00, 2.00, 'silver', 150),
-            ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',-5),
+            ('Arcoiris', (255, 180, 255), (100, 200, 255), (255, 255, 100), 3.00,10, 3.00, 3.00, 'rainbow',300),
+            ('Arrecife', (255, 170, 145), (220, 95, 90),   (255, 235, 180), 1.25, 6, 1.25, 1.25, 'water',  110),
+            ('Tormenta', (190, 205, 230), (55, 75, 120),   (235, 240, 255), 1.50, 7, 1.50, 1.50, 'stars',  125),
         ]
         self.pelican_skin_idx = 0
         self.osprey_skin_idx  = 0
         # skins already purchased (index 0 free by default)
         self.unlocked_pelican = {0}
         self.unlocked_osprey  = {0}
+        self._load_level_progress()
         self._pf_purchase_type = 'gems'   # 'gems' | 'rainbow_pelican'
         # skin bonus multipliers (set by _apply_skin)
         self.skin_luck_bonus    = 0.0
@@ -1764,6 +1759,7 @@ class Game:
             self.update()
             self.draw()
             self.clock.tick(FPS)
+        self._save_level_progress()
         pygame.quit()
         sys.exit()
 
@@ -1921,19 +1917,12 @@ class Game:
                         ('osprey_hp',  10),
                         ('stamina',    20),
                         ('ammo',        5),
-                        ('gems_1000',   5),
+                        ('shrimp_charge', 12),
                     ]
                     for i, btn in enumerate(self.item_store_btns):
                         if btn.collidepoint(mx, my):
                             key, cost = _items[i]
-                            if key == 'gems_1000':
-                                if self.caught_count >= cost:
-                                    for k in self._pf_fields:
-                                        self._pf_fields[k] = ''
-                                    self._pf_active = 'Nombre'
-                                    self._pf_pending_cost = cost
-                                    self.state = GameState.PURCHASE_FORM
-                            elif self.caught_count >= cost:
+                            if self.caught_count >= cost:
                                 self.caught_count -= cost
                                 if key == 'pelican_hp':
                                     self.pelican.hp = self.pelican.max_hp
@@ -1942,7 +1931,12 @@ class Game:
                                 elif key == 'stamina':
                                     self.stamina = self.max_stamina
                                 elif key == 'ammo':
-                                    self.active_bird.ammo += 10
+                                    self.active_bird.ammo = min(10, self.active_bird.ammo + 10)
+                                elif key == 'shrimp_charge':
+                                    self.shrimp_charge += 1
+                                self._save_level_progress()
+                            else:
+                                self._add_message(f"Faltan {cost - self.caught_count} monedas para esta compra.")
                     return True
 
                 # ── PURCHASE FORM screen ───────────────────────
@@ -2055,14 +2049,7 @@ class Game:
                                 else:
                                     self.osprey_skin_idx = idx
                                 self._apply_skin()
-                            elif cost == -5:
-                                # $5 USD purchase — open the purchase form
-                                for k in self._pf_fields:
-                                    self._pf_fields[k] = ''
-                                self._pf_active = 'Nombre'
-                                self._pf_pending_cost = 0
-                                self._pf_purchase_type = 'rainbow_pelican'
-                                self.state = GameState.PURCHASE_FORM
+                                self._save_level_progress()
                             elif self.caught_count >= cost:
                                 # purchase with fish coins
                                 self.caught_count -= cost
@@ -2072,6 +2059,7 @@ class Game:
                                 else:
                                     self.osprey_skin_idx = idx
                                 self._apply_skin()
+                                self._save_level_progress()
                                 self._add_message(f"¡Skin '{skins_list[idx][0]}' desbloqueada!")
                             else:
                                 self._add_message(f"Faltan {cost - self.caught_count} monedas para esta skin")
@@ -2292,10 +2280,20 @@ class Game:
         self._add_message("Martin: Use arrows/WASD to fly! Z=pelican dive, X=osprey dive")
 
     def _maybe_spawn_shrimp_pickup(self, x, y):
-        if random.random() >= 0.05:
+        if random.random() >= SHRIMP_DROP_CHANCE:
             return False
         self.shrimp_pickups.append(ShrimpPickup(x, y))
         return True
+
+    def _collect_shrimp_pickup(self, bird, pickup):
+        pickup.alive = False
+        if bird.bird_type == 'pelican':
+            self.shrimp_charge += 1
+            self._add_message("¡Camarón recogido! El pico del pelícano está listo.")
+        else:
+            bird.hp = min(bird.max_hp, bird.hp + 1)
+            self.stamina = min(self.max_stamina, self.stamina + 12)
+            self._add_message("¡Camarón recogido! El ave pescadora recupera energía.")
 
     def _shoot(self, bird, target=None):
         if self.state != GameState.FLYING:
@@ -2344,7 +2342,9 @@ class Game:
         dist = math.hypot(dx, dy)
         if dist < 1: dx, dy = 1.0, 0.0
         else: dx /= dist; dy /= dist
-        bird.burst_queue    = 8 if self.shrimp_charge > 0 else 6
+        has_shrimp_charge = self.shrimp_charge > 0
+        bird.burst_queue    = min(8 if has_shrimp_charge else 6, bird.ammo)
+        bird.burst_shrimp_count = min(6, bird.burst_queue) if has_shrimp_charge else 0
         bird.burst_interval = 0
         bird._burst_dx      = dx
         bird._burst_dy      = dy
@@ -2365,7 +2365,7 @@ class Game:
         dx = bird._burst_dx * math.cos(spread) - bird._burst_dy * math.sin(spread)
         dy = bird._burst_dx * math.sin(spread) + bird._burst_dy * math.cos(spread)
         speed = FishBullet.SPEED * 1.15
-        if self.shrimp_charge > 0 or bird.burst_queue <= 6:
+        if bird.burst_queue <= bird.burst_shrimp_count:
             self.bullets.append(ShrimpBullet(bird.x, bird.y, dx * speed, dy * speed,
                                              color=(240, 120, 70)))
         else:
@@ -2470,18 +2470,79 @@ class Game:
             self.completed_level = min(
                 self.unlocked_level - 1,
                 max(0, int(progress.get('completed_level', 0))))
+            if hasattr(self, 'caught_count'):
+                self.caught_count = max(0, int(progress.get('coins', self.caught_count)))
+            if hasattr(self, 'rebirth_count'):
+                self.rebirth_count = max(0, int(progress.get('rebirth_count', self.rebirth_count)))
+            if hasattr(self, 'max_upgrade'):
+                self.max_upgrade = max(3, min(5, int(progress.get('max_upgrade', self.max_upgrade))))
+            for key in ('crabs_caught_total', 'golden_caught_total', 'normal_fish_caught'):
+                if hasattr(self, key):
+                    setattr(self, key, max(0, int(progress.get(key, getattr(self, key)))))
+            if hasattr(self, 'upgrades'):
+                saved_upgrades = progress.get('upgrades', {})
+                if isinstance(saved_upgrades, dict):
+                    for key in self.upgrades:
+                        try:
+                            value = int(saved_upgrades.get(key, self.upgrades[key]))
+                        except (TypeError, ValueError):
+                            continue
+                        self.upgrades[key] = max(0, min(self.max_upgrade, value))
+            if hasattr(self, 'unlocked_pelican'):
+                for key, unlocks_attr, index_attr, skin_attr in (
+                        ('pelican_skins', 'unlocked_pelican', 'pelican_skin_idx', 'pelican_skins'),
+                        ('osprey_skins', 'unlocked_osprey', 'osprey_skin_idx', 'osprey_skins')):
+                    skin_count = len(getattr(self, skin_attr))
+                    saved_unlocks = progress.get(key, [0])
+                    if not isinstance(saved_unlocks, list):
+                        saved_unlocks = [0]
+                    unlocked = {0}
+                    for value in saved_unlocks:
+                        try:
+                            index = int(value)
+                        except (TypeError, ValueError):
+                            continue
+                        if 0 <= index < skin_count:
+                            unlocked.add(index)
+                    setattr(self, unlocks_attr, unlocked)
+                    try:
+                        selected = int(progress.get(index_attr, 0))
+                    except (TypeError, ValueError):
+                        selected = 0
+                    setattr(self, index_attr, selected if selected in unlocked else 0)
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 
     def _save_level_progress(self):
         try:
+            progress = {
+                'unlocked_level': self.unlocked_level,
+                'completed_level': self.completed_level,
+                'coins': getattr(self, 'caught_count', 0),
+                'upgrades': getattr(self, 'upgrades', {}),
+                'rebirth_count': getattr(self, 'rebirth_count', 0),
+                'max_upgrade': getattr(self, 'max_upgrade', 3),
+                'crabs_caught_total': getattr(self, 'crabs_caught_total', 0),
+                'golden_caught_total': getattr(self, 'golden_caught_total', 0),
+                'normal_fish_caught': getattr(self, 'normal_fish_caught', 0),
+            }
+            if hasattr(self, 'unlocked_pelican'):
+                progress.update({
+                    'pelican_skins': sorted(self.unlocked_pelican),
+                    'osprey_skins': sorted(self.unlocked_osprey),
+                    'pelican_skin_idx': self.pelican_skin_idx,
+                    'osprey_skin_idx': self.osprey_skin_idx,
+                })
             with open(self._level_progress_path, 'w', encoding='utf-8') as progress_file:
-                json.dump({
-                    'unlocked_level': self.unlocked_level,
-                    'completed_level': self.completed_level,
-                }, progress_file)
+                json.dump(progress, progress_file)
         except OSError:
             self._add_message('No se pudo guardar el progreso de niveles.')
+
+    def _tick_progress_autosave(self):
+        self._progress_save_timer -= 1
+        if self._progress_save_timer <= 0:
+            self._save_level_progress()
+            self._progress_save_timer = FPS * 5
 
     def _pick_ai_target(self, bird):
         if self.boss is not None and getattr(self.boss, 'hp', 0) > 0:
@@ -2518,6 +2579,7 @@ class Game:
     #  UPDATE
     # ═══════════════════════════════════════════
     def update(self):
+        self._tick_progress_autosave()
         if self.state == GameState.MENU:
             self._update_demo_birds()
             self._update_clouds()
@@ -2950,10 +3012,7 @@ class Game:
                         continue
                     dist = math.hypot(bird.x - shp.x, bird.y - shp.y)
                     if dist < bird.capture_radius // 2 + shp.radius:
-                        shp.alive = False
-                        if bird.bird_type == 'pelican':
-                            self.shrimp_charge += 1
-                            self._add_message("¡Camarón recogido! El pico del pelícano está listo.")
+                        self._collect_shrimp_pickup(bird, shp)
                         break
         self.shrimp_pickups = [shp for shp in self.shrimp_pickups if shp.alive]
 
@@ -4016,7 +4075,7 @@ class Game:
              self.stamina >= self.max_stamina),
             ("Municion Extra",       "+10 balas al ave activa",                     5, (255, 140, 60),
              False),
-            (f"1000 Gemas  ($5)",    f"\u00a1Llena el formulario!  \u2666 {self.gems} gemas",  5, (180, 80, 220),
+            ("Camarón extra",          f"+1 carga de ráfaga  |  {self.shrimp_charge} cargas", 12, (240, 130, 80),
              False),
         ]
 
