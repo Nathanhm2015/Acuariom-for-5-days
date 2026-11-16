@@ -4112,67 +4112,13 @@ class Game:
     # ═══════════════════════════════════════════
     #  PURCHASE FORM helpers
     # ═══════════════════════════════════════════
-    def _send_purchase_email(self, to_email, nombre, gems, cost_usd):
-        """No-op placeholder so purchases don't fail on mail configuration errors."""
-        return
-
-    def _send_owner_notification(self, record, gems, cost_usd):
-        """No-op placeholder so purchase notifications do not spam errors."""
-        return
-
     def _pf_submit(self):
-        """Process form submission — awards gems or unlocks rainbow skin."""
-        record = {k: v for k, v in self._pf_fields.items()}
-        record['id'] = len(self._pf_records) + 1
-        self._pf_records.append(record)
-
-        if self._pf_purchase_type == 'rainbow_pelican':
-            # Unlock rainbow skin for BOTH birds (real $5 payment)
-            self.unlocked_pelican.add(len(self.pelican_skins) - 1)
-            self.unlocked_osprey.add(len(self.osprey_skins) - 1)
-            self.pelican_skin_idx = len(self.pelican_skins) - 1
-            self.osprey_skin_idx  = len(self.osprey_skins) - 1
-            self._apply_skin()
-            self._send_purchase_email(
-                to_email = self._pf_fields.get('Correo', '').strip(),
-                nombre   = self._pf_fields.get('Nombre', '').strip(),
-                gems     = 0,
-                cost_usd = 5,
-            )
-            self._send_owner_notification(
-                record   = {k: v for k, v in self._pf_fields.items()},
-                gems     = 0,
-                cost_usd = 5,
-            )
-            for k in self._pf_fields:
-                self._pf_fields[k] = ''
-            self._pf_active = None
-            self._pf_purchase_type = 'gems'
-            self._add_message('\u00a1Skin Arcoiris desbloqueada! \U0001f308')
-            self.state = GameState.SKINS
-        else:
-            # Default: award 1000 gems
-            if self.caught_count < self._pf_pending_cost:
-                self._add_message('\u00a1No tienes suficientes monedas!')
-                return
-            self.caught_count -= self._pf_pending_cost
-            self.gems         += 1000
-            self._send_purchase_email(
-                to_email  = self._pf_fields.get('Correo', '').strip(),
-                nombre    = self._pf_fields.get('Nombre', '').strip(),
-                gems      = 1000,
-                cost_usd  = 5,
-            )
-            self._send_owner_notification(
-                record   = {k: v for k, v in self._pf_fields.items()},
-                gems     = 1000,
-                cost_usd = 5,
-            )
-            for k in self._pf_fields:
-                self._pf_fields[k] = ''
-            self._pf_active = None
-            self._add_message(f'\u00a1Compraste 1000 Gemas! Total: {self.gems} gemas')
-            self.state = GameState.ITEM_STORE
+        """Prevent the legacy form from granting currency without payment verification."""
+        for key in self._pf_fields:
+            self._pf_fields[key] = ''
+        self._pf_active = None
+        self._add_message('Las compras de oro todavía no están configuradas; no se realizó ningún cobro.')
+        self.state = GameState.ITEM_STORE
 
     # ═══════════════════════════════════════════
     #  PURCHASE FORM PANEL

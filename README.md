@@ -31,6 +31,12 @@ Al iniciar una partida puedes ver el tutorial, elegir el modo y abrir el mapa de
 
 Los camarones aparecen al atrapar cangrejos con el pelícano, flotan a la superficie y se pueden recoger con ambas aves. Cargan la ráfaga del pelícano o curan al ave pescadora. También puedes comprar una carga extra en la tienda. Cada ave tiene nueve skins desbloqueables con monedas.
 
+## Monedas de oro
+
+Paquetes previstos: 100 monedas por US$2, 1.000.000 por US$10 y 10.000.000 por US$15. La promoción de Navidad aplica 50% de descuento del 24 al 26 de diciembre.
+
+El catálogo y el ledger del servidor están implementados en `server/commerce.py`, pero el checkout sigue deshabilitado: todavía faltan cuentas de jugador y un proveedor de pagos con cuenta de cobro verificada. Las compras reales solo se activarán cuando el servidor pueda verificar los pagos y el proveedor sea compatible con el país de cobro.
+
 ## Pruebas
 
 ```bash
