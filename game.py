@@ -1425,7 +1425,7 @@ class Game:
         self._stamina_drain = 100.0 / (STAMINA_DRAIN_SECONDS * FPS)
 
         self.guide_messages = []
-        self._add_message("Chris: Press Play to begin the game.")
+        self._add_message("Elige EMPEZAR para abrir el juego.")
 
         # ── combo & score feedback ─────────────────────
         self.combo = 0
@@ -3131,12 +3131,151 @@ class Game:
 
     # ── background: sky + islands + clouds ───────
     def _draw_background(self):
-        if self.bg_image and self.state != GameState.START:
+        gameplay_states = (
+            GameState.START,
+            GameState.FLYING,
+            GameState.DIVING,
+            GameState.UNDERWATER,
+            GameState.RISING,
+        )
+        if self.bg_image and self.state not in gameplay_states:
             self.screen.blit(self.bg_image, (0, 0))
             return
 
-        # sky gradient
-        sky_height = WATER_Y if self.state != GameState.START else SCREEN_HEIGHT
+        if self.state in gameplay_states:
+            now = pygame.time.get_ticks()
+
+            # Deep sunset gradient: coral sky fading into turquoise ocean.
+            for y in range(SCREEN_HEIGHT):
+                if y < 470:
+                    p = y / 470.0
+                    top = (34, 72, 130)
+                    mid = (83, 153, 205)
+                    low = (255, 190, 142)
+                    if p < 0.62:
+                        q = p / 0.62
+                        c = tuple(int(top[i] * (1-q) + mid[i] * q) for i in range(3))
+                    else:
+                        q = (p - 0.62) / 0.38
+                        c = tuple(int(mid[i] * (1-q) + low[i] * q) for i in range(3))
+                else:
+                    p = (y - 470) / max(1, SCREEN_HEIGHT - 470)
+                    c = tuple(int((24, 118, 171)[i] * (1-p) + (5, 42, 92)[i] * p)
+                              for i in range(3))
+                pygame.draw.line(self.screen, c, (0, y), (SCREEN_WIDTH, y))
+
+            # Sun, bloom and a golden reflection that reaches the bottom.
+            sun_x = int(SCREEN_WIDTH * 0.72)
+            sun_y = 210
+            glow = pygame.Surface((300, 300), pygame.SRCALPHA)
+            for radius, alpha in ((145, 10), (112, 16), (78, 28), (48, 65)):
+                pygame.draw.circle(glow, (255, 196, 122, alpha), (150, 150), radius)
+            self.screen.blit(glow, (sun_x - 150, sun_y - 150))
+            pygame.draw.circle(self.screen, (255, 241, 185), (sun_x, sun_y), 43)
+            pygame.draw.circle(self.screen, (255, 210, 145), (sun_x, sun_y), 31)
+
+            reflection = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT - 470), pygame.SRCALPHA)
+            for row in range(0, reflection.get_height(), 7):
+                width = 32 + row * 2 + int(abs(math.sin(now * 0.002 + row * 0.08)) * 40)
+                center = sun_x + int(math.sin(row * 0.12 + now * 0.001) * 14)
+                alpha = max(8, 80 - row // 5)
+                pygame.draw.line(reflection, (255, 220, 158, alpha),
+                                 (center - width, row), (center + width, row), 3)
+            self.screen.blit(reflection, (0, 470))
+
+            # Wispy clouds with coral and pearl highlights.
+            for index, (nx, base_y, sz, vx, phase, amp) in enumerate(self.clouds):
+                travel = (nx + now * 0.012 * (0.6 + vx) + index * 170) % (SCREEN_WIDTH + 240) - 120
+                ny = 72 + base_y * 0.56 + math.sin(phase + now * 0.00035) * amp
+                cloud = pygame.Surface((sz * 5, sz * 3), pygame.SRCALPHA)
+                for ox, oy, r, alpha in [
+                        (sz, sz, sz, 190),
+                        (sz * 1.55, sz - 14, sz - 7, 205),
+                        (sz * 2.15, sz + 2, sz - 9, 155),
+                        (sz * 2.8, sz - 4, sz - 12, 130)]:
+                    pygame.draw.circle(cloud, (255, 215, 190, alpha),
+                                       (int(ox), int(oy)), int(r))
+                self.screen.blit(cloud, (int(travel - sz), int(ny - sz)))
+
+            # Distant mountain/island silhouettes create a full depth hierarchy.
+            far_y = 445
+            far = [(0, 445), (170, 360), (310, 420), (470, 390),
+                   (650, 438), (820, 374), (980, 420), (1150, 350),
+                   (SCREEN_WIDTH, 430), (SCREEN_WIDTH, far_y), (0, far_y)]
+            pygame.draw.polygon(self.screen, (35, 83, 112), far)
+            haze = pygame.Surface((SCREEN_WIDTH, 90), pygame.SRCALPHA)
+            pygame.draw.rect(haze, (225, 212, 180, 38), (0, 0, SCREEN_WIDTH, 90))
+            self.screen.blit(haze, (0, far_y - 64))
+
+            # Two palm islands frame the horizon without obstructing the UI.
+            def draw_start_island(cx, base_y, size, flip=False):
+                sign = -1 if flip else 1
+                pygame.draw.polygon(self.screen, (18, 72, 73),
+                                    [(cx - size, base_y),
+                                     (cx - size * 0.38, base_y - size * 0.48),
+                                     (cx + size * 0.62, base_y - size * 0.42),
+                                     (cx + size, base_y)])
+                trunk_x = cx + sign * size * 0.22
+                trunk_top = base_y - size * 0.78
+                pygame.draw.line(self.screen, (91, 67, 43),
+                                 (trunk_x, base_y), (trunk_x + sign * size * 0.10, trunk_top),
+                                 max(5, size // 12))
+                for angle in (-2.3, -1.8, -1.25, -0.7, -0.15, 0.45):
+                    hx = trunk_x + sign * int(math.cos(angle) * size * 0.48)
+                    hy = trunk_top + int(math.sin(angle) * size * 0.34)
+                    pygame.draw.line(self.screen, (24, 112, 82),
+                                     (trunk_x, trunk_top), (hx, hy), max(3, size // 18))
+
+            draw_start_island(205, 468, 82)
+            draw_start_island(SCREEN_WIDTH - 220, 465, 112, True)
+
+            # Ocean bands, foam and animated light sparkles.
+            horizon = 470
+            for y in range(horizon, SCREEN_HEIGHT):
+                p = (y - horizon) / max(1, SCREEN_HEIGHT - horizon)
+                c = tuple(int((24, 118, 171)[i] * (1-p) + (5, 42, 92)[i] * p)
+                          for i in range(3))
+                pygame.draw.line(self.screen, c, (0, y), (SCREEN_WIDTH, y))
+
+            t = now * 0.001
+            for row in range(5):
+                y = horizon + 34 + row * 48
+                phase = t * (0.9 + row * 0.08)
+                for x in range(-80, SCREEN_WIDTH + 80, 95):
+                    wave_x = int(x + math.sin(phase + x * 0.018) * 22)
+                    length = 28 + 22 * row
+                    pygame.draw.line(self.screen, (150, 224, 238),
+                                     (wave_x, y), (wave_x + length, y), 3)
+                    pygame.draw.circle(self.screen, (220, 250, 245),
+                                       (wave_x + length // 2, y), 3)
+
+            # Small seabirds sweep across the scene behind the interface.
+            for index in range(5):
+                x = int((now * (0.025 + index * 0.002) + 700 + index * 190)
+                        % (SCREEN_WIDTH + 300) - 150)
+                y = 118 + index * 42 + int(math.sin(now * 0.0015 + index) * 12)
+                size = 13 + index % 2 * 4
+                pygame.draw.arc(self.screen, (38, 67, 80),
+                                (x - size, y - 7, size * 2, 14), 3.35, 5.95, 3)
+                pygame.draw.arc(self.screen, (38, 67, 80),
+                                (x - size, y - 7, size * 2, 14), 0.15, 2.75, 3)
+
+            # Fish silhouettes in the lower water add life to the hero scene.
+            for index, x in enumerate((120, 360, 610, 850, 1080, 1280)):
+                y = 610 + (index % 3) * 38
+                fish_x = int((x + now * (0.018 + index * 0.002)) % (SCREEN_WIDTH + 120) - 60)
+                pygame.draw.ellipse(self.screen, (28, 94, 130),
+                                    (fish_x - 10, y - 4, 20, 8))
+                direction = 1 if index % 2 == 0 else -1
+                pygame.draw.polygon(self.screen, (28, 94, 130),
+                                    [(fish_x - direction * 10, y),
+                                     (fish_x - direction * 20, y - 7),
+                                     (fish_x - direction * 20, y + 7)])
+
+            return
+
+        # sky gradient for normal game screens
+        sky_height = WATER_Y
         for y in range(sky_height):
             r = min(1.0, y / WATER_Y)
             c = (int(SKY_TOP[0]*(1-r) + SKY_BOTTOM[0]*r),
@@ -3157,10 +3296,9 @@ class Game:
                                    (int(ox), int(oy)), int(r))
             self.screen.blit(cloud_surf, (int(nx - sz), int(ny - sz)))
 
-        if self.state != GameState.START:
-            # tropical islands
-            self._draw_island(155, WATER_Y, 115)
-            self._draw_island(845, WATER_Y, 135)
+        # tropical islands
+        self._draw_island(155, WATER_Y, 115)
+        self._draw_island(845, WATER_Y, 135)
 
     def _draw_island(self, cx, base_y, sz):
         pts = [(cx - sz, base_y), (cx, base_y - sz * 1.1), (cx + sz, base_y)]
@@ -3457,25 +3595,21 @@ class Game:
         thickness = 7 if active else 4
         pygame.draw.circle(self.screen, border_color, (cx, cy), rad, thickness)
 
-        # bird silhouette
-        r = rad - 16
-        if bird.bird_type == 'pelican':
-            pygame.draw.ellipse(self.screen, (55, 110, 55),
-                                (cx - r, cy - r//2, r*2, r))
-            pygame.draw.polygon(self.screen, (18, 52, 18),
-                                [(cx, cy), (cx - r*2, cy - r//2), (cx - r, cy + r//3)])
-            pygame.draw.polygon(self.screen, (18, 52, 18),
-                                [(cx, cy), (cx + r*2, cy - r//2), (cx + r, cy + r//3)])
-            pygame.draw.polygon(self.screen, (210, 140, 25),
-                                [(cx + r, cy - r//4), (cx + r*2, cy),
-                                 (cx + r, cy + r//4)])
-        else:
-            pygame.draw.ellipse(self.screen, (160, 172, 182),
-                                (cx - r, cy - r//2, r*2, r))
-            pygame.draw.polygon(self.screen, (36, 46, 66),
-                                [(cx, cy), (cx - r*2, cy - r//2), (cx - r, cy + r//3)])
-            pygame.draw.polygon(self.screen, (36, 46, 66),
-                                [(cx, cy), (cx + r*2, cy - r//2), (cx + r, cy + r//3)])
+        # Real bird sprite from the game's animated GIF assets
+        if bird.frames:
+            sprite = bird.frames[(bird.frame // 4) % len(bird.frames)].copy()
+            max_w = int(rad * 1.55)
+            max_h = int(rad * 1.20)
+            sprite_w, sprite_h = sprite.get_size()
+            scale = min(max_w / max(sprite_w, 1), max_h / max(sprite_h, 1))
+            sprite = pygame.transform.smoothscale(
+                sprite,
+                (max(1, int(sprite_w * scale)), max(1, int(sprite_h * scale))),
+            )
+            if bird.bird_type == 'pelican':
+                sprite = pygame.transform.flip(sprite, True, False)
+            sprite_rect = sprite.get_rect(center=(cx, cy))
+            self.screen.blit(sprite, sprite_rect)
 
         # key label [A] / [D]
         lbl = self.font_sm.render(f"[{key}]", True, border_color)
@@ -3545,132 +3679,182 @@ class Game:
                 dr_lbl   = self.font_sm.render("[E] ¡TALADRO LISTO!", True, (255, 230, 60))
             self.screen.blit(dr_lbl, (cx - dr_lbl.get_width() // 2, ammo_y + 30))
     def _draw_start_screen(self):
-        # overlay
-        ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        ov.fill((0, 20, 45, 150))
-        self.screen.blit(ov, (0, 0))
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((4, 28, 58, 112))
+        self.screen.blit(overlay, (0, 0))
 
-        # guide message
-        if self.guide_messages:
-            txt, _ = self.guide_messages[0]
-            s = self.font_sm.render(txt, True, WHITE)
-            self.screen.blit(s, (SCREEN_WIDTH//2 - s.get_width()//2, 24))
+        # Cinematic title block
+        accent = pygame.Rect(80, 92, 7, 154)
+        pygame.draw.rect(self.screen, (255, 195, 55), accent, border_radius=4)
 
-        # title
-        t1 = self.font_lg.render("WINGS", True, WHITE)
-        t2 = self.font_lg.render("& FISH", True, (255, 200, 40))
-        self.screen.blit(t1, (80, 95))
-        self.screen.blit(t2, (80, 168))
+        title_small = self.font_sm.render("AVENTURA DE AIRE Y MAR", True, (165, 218, 255))
+        self.screen.blit(title_small, (104, 82))
 
-        # subtitle
-        sub = self.font_title.render("Catch fish with seabirds!", True, WHITE)
-        self.screen.blit(sub, (80, 255))
+        title_pieces = (
+            (self.font_lg.render("WINGS", True, WHITE), 104, 112),
+            (self.font_lg.render("& FISH", True, (255, 205, 55)), 104, 188),
+        )
+        for surface, x, y in title_pieces:
+            shadow = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+            shadow.blit(surface, (0, 0))
+            shadow.set_alpha(90)
+            self.screen.blit(shadow, (x + 5, y + 6))
+            self.screen.blit(surface, (x, y))
 
-        # instructions
-        for i, line in enumerate([
-            "Toca PLAY para elegir entre modo libre y niveles",
-            "WASD / Flechas: mover el ave  |  Clic izq/Espacio: zambullirse  |  Clic der: disparar",
-            "Z: Pelicano se zambulle  |  X: Ave pescadora se zambulle",
-            "Q: Ráfaga pelicano | Clic-der osprey: peck dive | E: ¡Taladro relámpago!",
-        ]):
-            s = self.font_sm.render(line, True, (195, 230, 255))
-            self.screen.blit(s, (80, 318 + i * 28))
+        subtitle = self.font_title.render("Vuela alto. Zambúllete. Atrapa el océano.",
+                                          True, (225, 242, 255))
+        self.screen.blit(subtitle, (104, 276))
 
-        # PLAY button
-        pygame.draw.rect(self.screen, ORANGE, self.btn_play, border_radius=14)
-        pygame.draw.rect(self.screen, (255, 205, 55), self.btn_play, 4, border_radius=14)
-        pt = self.font_title.render("MODOS", True, WHITE)
-        self.screen.blit(pt, (self.btn_play.centerx - pt.get_width()//2,
-                               self.btn_play.centery - pt.get_height()//2))
+        # Three compact gameplay pillars
+        pillar_y = 338
+        pillar_w = 270
+        pill_gap = 18
+        pillars = (
+            ("01", "ELIGE", "Libre o campaña"),
+            ("02", "ATRAPA", "Peces y camarones"),
+            ("03", "LUCHA", "Jefes cada oleada"),
+        )
+        for index, (number, label, detail) in enumerate(pillars):
+            x = 104 + index * (pillar_w + pill_gap)
+            rect = pygame.Rect(x, pillar_y, pillar_w, 82)
+            pygame.draw.rect(self.screen, (8, 48, 82, 190), rect, border_radius=10)
+            pygame.draw.rect(self.screen, (82, 150, 195), rect, 2, border_radius=10)
 
-        # shop + gear icons + item store
+            num = self.font_title.render(number, True, (255, 195, 55))
+            self.screen.blit(num, (x + 14, y := rect.y + 14))
+            name = self.font.render(label, True, WHITE)
+            self.screen.blit(name, (x + 72, rect.y + 16))
+            detail_surf = self.font_sm.render(detail, True, (180, 215, 235))
+            self.screen.blit(detail_surf, (x + 72, rect.y + 48))
+
+        # Main CTA replaces the old small top-right PLAY rectangle
+        self.btn_play = pygame.Rect(104, 454, 330, 72)
+        pulse = 2 if (pygame.time.get_ticks() // 700) % 2 == 0 else 0
+        pygame.draw.rect(self.screen, (255, 132, 25),
+                         (self.btn_play.x - pulse, self.btn_play.y - pulse,
+                          self.btn_play.w + pulse * 2, self.btn_play.h + pulse * 2),
+                         border_radius=16)
+        pygame.draw.rect(self.screen, (255, 210, 82), self.btn_play, 4, border_radius=16)
+        play = self.font_title.render("EMPEZAR", True, WHITE)
+        arrow = self.font_lg.render("›", True, (255, 235, 160))
+        self.screen.blit(play, (self.btn_play.centerx - play.get_width() // 2 - 18,
+                                self.btn_play.centery - play.get_height() // 2))
+        self.screen.blit(arrow, (self.btn_play.right - 48,
+                                 self.btn_play.centery - arrow.get_height() // 2 - 4))
+
+        # Top utility row with fish coins, store and settings
+        utility_x = SCREEN_WIDTH - 260
+        pygame.draw.rect(self.screen, (10, 38, 68, 205),
+                         (utility_x - 16, 20, 244, 68), border_radius=12)
+        pygame.draw.rect(self.screen, (70, 145, 190),
+                         (utility_x - 16, 20, 244, 68), 2, border_radius=12)
+
+        coin_x = utility_x + 14
+        pygame.draw.circle(self.screen, (255, 205, 55), (coin_x, 54), 13)
+        pygame.draw.circle(self.screen, (155, 105, 20), (coin_x, 54), 13, 2)
+        coin_count = self.font.render(str(self.caught_count), True, WHITE)
+        self.screen.blit(coin_count, (coin_x + 20, 38))
+
+        # Keep existing utility buttons functional
+        self.btn_shop.topleft = (utility_x + 112, 30)
+        self.btn_item_store.topleft = (utility_x + 168, 30)
+        self.btn_gear_left.topleft = (utility_x + 220, 30)
+        self.btn_item_store.size = (44, 44)
+        self.btn_shop.size = (44, 44)
+        self.btn_gear_left.size = (44, 44)
         pygame.draw.rect(self.screen, (180, 50, 50), self.btn_item_store, border_radius=10)
         pygame.draw.rect(self.screen, (255, 130, 130), self.btn_item_store, 2, border_radius=10)
-        _tl2 = self.font_sm.render("TIENDA", True, (255, 255, 255))
-        self.screen.blit(_tl2, (self.btn_item_store.centerx - _tl2.get_width()//2,
-                                 self.btn_item_store.centery - _tl2.get_height()//2))
-        self._icon_shop(self.btn_shop.centerx, self.btn_shop.centery, 16)
-        self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 16)
+        item_label = self.font_sm.render("TIENDA", True, WHITE)
+        self.screen.blit(item_label, (self.btn_item_store.centerx - item_label.get_width() // 2,
+                                      self.btn_item_store.centery - item_label.get_height() // 2))
+        self._icon_shop(self.btn_shop.centerx, self.btn_shop.centery, 14)
+        self._icon_gear(self.btn_gear_left.centerx, self.btn_gear_left.centery, 12)
 
-        # bird preview
-        self.pelican.x, self.pelican.y = 760, 210
-        self.osprey.x,  self.osprey.y  = 620, 160
+        # Hero bird preview
+        self.pelican.x, self.pelican.y = SCREEN_WIDTH - 210, 300
+        self.osprey.x, self.osprey.y = SCREEN_WIDTH - 390, 250
         self.pelican.facing_right = False
-        self.osprey.facing_right  = True
+        self.osprey.facing_right = True
         self._draw_birds()
+
+        # Small status strip below the hero button
+        status_x = 104
+        status_y = 548
+        pygame.draw.line(self.screen, (110, 180, 215), (status_x, status_y),
+                         (status_x + 330, status_y), 2)
+        status = self.font_sm.render("PELÍCANO  +  AVE PESCADOR  ·  DOS HABILIDADES",
+                                     True, (180, 220, 240))
+        self.screen.blit(status, (status_x, status_y + 14))
 
     def _draw_mode_select_screen(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 12, 30, 190))
+        overlay.fill((3, 18, 38, 205))
         self.screen.blit(overlay, (0, 0))
 
         panel = pygame.Surface(self.mode_select_panel.size, pygame.SRCALPHA)
-        panel.fill((8, 24, 42, 245))
+        panel.fill((7, 29, 54, 248))
         self.screen.blit(panel, self.mode_select_panel.topleft)
-        pygame.draw.rect(self.screen, (95, 190, 220), self.mode_select_panel, 3, border_radius=18)
+        pygame.draw.rect(self.screen, (92, 178, 215), self.mode_select_panel, 3, border_radius=18)
 
+        eyebrow = self.font_sm.render("SELECCIONA TU CAMINO", True, (145, 210, 238))
+        self.screen.blit(eyebrow, (self.mode_select_panel.centerx - eyebrow.get_width() // 2,
+                                   self.mode_select_panel.y + 22))
         title = self.font_lg.render("ELIGE TU MODO", True, WHITE)
         self.screen.blit(title, (self.mode_select_panel.centerx - title.get_width() // 2,
-                                 self.mode_select_panel.y + 18))
+                                 self.mode_select_panel.y + 48))
 
         mouse_pos = pygame.mouse.get_pos()
-        cards = [
-            (self.btn_mode_free, (20, 92, 82), (80, 225, 175)),
-            (self.btn_mode_levels, (35, 70, 125), (100, 190, 255)),
-        ]
-        for rect, color, border in cards:
-            fill = tuple(min(255, channel + 18) for channel in color) if rect.collidepoint(mouse_pos) else color
-            pygame.draw.rect(self.screen, fill, rect, border_radius=14)
-            pygame.draw.rect(self.screen, border, rect, 3, border_radius=14)
+        cards = (
+            (self.btn_mode_free, (18, 105, 92), (105, 225, 180), "LIBRE", "Pescas sin límites",
+             ("Oleadas infinitas", "Jefes 10 y 25")),
+            (self.btn_mode_levels, (25, 74, 138), (110, 180, 255), "CAMPAÑA", "20 niveles",
+             ("5 oleadas por nivel", "Jefe cada 10 niveles")),
+        )
 
-        free_title = self.font_title.render("MODO LIBRE", True, (135, 245, 205))
-        self.screen.blit(free_title, (self.btn_mode_free.centerx - free_title.get_width() // 2,
-                                      self.btn_mode_free.y + 30))
-        free_lines = ("Explora y pesca sin una ruta fija.",
-                      "Juega las oleadas de siempre.",
-                      "Jefes en las oleadas 10 y 25.")
-        for index, line in enumerate(free_lines):
-            text = self.font.render(line, True, WHITE)
-            self.screen.blit(text, (self.btn_mode_free.centerx - text.get_width() // 2,
-                                    self.btn_mode_free.y + 105 + index * 42))
-        free_action = self.font_title.render("JUGAR LIBRE", True, WHITE)
-        self.screen.blit(free_action, (self.btn_mode_free.centerx - free_action.get_width() // 2,
-                                       self.btn_mode_free.bottom - 72))
+        for rect, fill, border, mode_name, tagline, features in cards:
+            hovered = rect.collidepoint(mouse_pos)
+            if hovered:
+                fill = tuple(min(255, channel + 15) for channel in fill)
+            pygame.draw.rect(self.screen, (3, 14, 28),
+                             (rect.x + 8, rect.y + 10, rect.w, rect.h), border_radius=16)
+            pygame.draw.rect(self.screen, fill, rect, border_radius=16)
+            pygame.draw.rect(self.screen, border, rect, 4 if hovered else 2, border_radius=16)
 
-        level_title = self.font_title.render("MODO NIVELES", True, (160, 205, 255))
-        self.screen.blit(level_title, (self.btn_mode_levels.centerx - level_title.get_width() // 2,
-                                       self.btn_mode_levels.y + 24))
-        map_label = self.font_sm.render("AVANZA NIVEL POR NIVEL", True, WHITE)
-        self.screen.blit(map_label, (self.btn_mode_levels.centerx - map_label.get_width() // 2,
-                                    self.btn_mode_levels.y + 76))
+            badge = pygame.Rect(rect.x + 28, rect.y + 28, 72, 72)
+            pygame.draw.circle(self.screen, (7, 36, 65), badge.center, 36)
+            pygame.draw.circle(self.screen, border, badge.center, 36, 3)
+            if mode_name == "LIBRE":
+                pygame.draw.circle(self.screen, border, badge.center, 12)
+                pygame.draw.line(self.screen, border, (badge.left + 12, badge.centery),
+                                 (badge.right - 12, badge.centery), 4)
+            else:
+                for ring in range(3):
+                    pygame.draw.circle(self.screen, border,
+                                       (badge.centerx - 14 + ring * 14,
+                                        badge.centery - 2 + (ring % 2) * 5), 5)
 
-        node_positions = []
-        for level in range(1, 11):
-            row = 0 if level <= 5 else 1
-            col = level - 1 if row == 0 else 10 - level
-            node_x = self.btn_mode_levels.x + 54 + col * (self.btn_mode_levels.w - 108) // 4
-            node_y = self.btn_mode_levels.y + 160 + row * 84
-            node_positions.append((node_x, node_y))
-        for index in range(9):
-            pygame.draw.line(self.screen, (110, 150, 195), node_positions[index],
-                             node_positions[index + 1], 4)
-        for level, (node_x, node_y) in enumerate(node_positions, start=1):
-            is_boss = level == 10
-            color = (245, 105, 75) if is_boss else (70, 155, 210)
-            pygame.draw.circle(self.screen, (10, 25, 45), (node_x, node_y), 23)
-            pygame.draw.circle(self.screen, color, (node_x, node_y), 20, 4 if is_boss else 0)
-            node_text = self.font_sm.render("J" if is_boss else str(level), True, WHITE)
-            self.screen.blit(node_text, (node_x - node_text.get_width() // 2,
-                                         node_y - node_text.get_height() // 2))
-        boss_label = self.font_sm.render("JEFE CADA 10 NIVELES", True, (255, 170, 125))
-        self.screen.blit(boss_label, (self.btn_mode_levels.centerx - boss_label.get_width() // 2,
-                                      self.btn_mode_levels.y + 360))
-        level_action = self.font_title.render("COMENZAR CAMPAÑA", True, WHITE)
-        self.screen.blit(level_action, (self.btn_mode_levels.centerx - level_action.get_width() // 2,
-                                        self.btn_mode_levels.bottom - 72))
+            name = self.font_title.render(mode_name, True, WHITE)
+            self.screen.blit(name, (rect.x + 118, rect.y + 34))
+            tag = self.font.render(tagline, True, border)
+            self.screen.blit(tag, (rect.x + 118, rect.y + 82))
 
-        pygame.draw.rect(self.screen, (70, 85, 100), self.btn_mode_back, border_radius=8)
-        pygame.draw.rect(self.screen, (170, 190, 205), self.btn_mode_back, 2, border_radius=8)
+            for index, feature in enumerate(features):
+                y = rect.y + 142 + index * 46
+                pygame.draw.circle(self.screen, border, (rect.x + 38, y + 10), 7)
+                text = self.font.render(feature, True, (225, 240, 248))
+                self.screen.blit(text, (rect.x + 58, y))
+
+            action = pygame.Rect(rect.x + 34, rect.bottom - 82, rect.w - 68, 48)
+            pygame.draw.rect(self.screen, border, action, border_radius=10)
+            pygame.draw.rect(self.screen, WHITE, action, 2, border_radius=10)
+            action_text = self.font.render("JUGAR AHORA" if mode_name == "LIBRE" else "VER MAPA",
+                                           True, (8, 35, 58) if mode_name == "LIBRE" else (12, 35, 78))
+            self.screen.blit(action_text,
+                             (action.centerx - action_text.get_width() // 2,
+                              action.centery - action_text.get_height() // 2))
+
+        pygame.draw.rect(self.screen, (55, 74, 96), self.btn_mode_back, border_radius=8)
+        pygame.draw.rect(self.screen, (155, 185, 205), self.btn_mode_back, 2, border_radius=8)
         back_text = self.font_sm.render("VOLVER", True, WHITE)
         self.screen.blit(back_text, (self.btn_mode_back.centerx - back_text.get_width() // 2,
                                      self.btn_mode_back.centery - back_text.get_height() // 2))
