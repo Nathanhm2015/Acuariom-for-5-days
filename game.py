@@ -683,6 +683,15 @@ class Bird:
                 if self.facing_right:
                     surf = pygame.transform.flip(surf, True, False)
                 surf = pygame.transform.rotate(surf, rot_angle)
+                max_sprite_w = 125
+                max_sprite_h = 85
+                sw, sh = surf.get_size()
+                scale = min(max_sprite_w / max(sw, 1), max_sprite_h / max(sh, 1))
+                if scale < 1:
+                    surf = pygame.transform.smoothscale(
+                        surf,
+                        (max(1, int(sw * scale)), max(1, int(sh * scale))),
+                    )
                 if self.fire_effect == 'rainbow':
                     hue = (self.frame * 5) % 360
                     rc2, gc2, bc2 = colorsys.hsv_to_rgb(hue / 360, 0.95, 1.0)
